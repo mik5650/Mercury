@@ -4,8 +4,9 @@ import { useApp, Sheet, Seg, Stepper, Toggle, Empty, Stat, NumInput } from "../u
 import { Icon } from "../ui/icons.jsx";
 import {
   todayKey, addDays, weekStart, parseKey, daysBetween, fmtDate, fmtTime, num, platesFor, warmupSets, epley1RM,
-  allSets, convertUnits, migrate, freshStore, downloadFile, unlockAudio, beep, STORAGE_KEY,
+  allSets, convertUnits, migrate, freshStore, unlockAudio, beep, STORAGE_KEY,
 } from "../lib/data.js";
+import { saveFile, isNative, notificationPermission, requestNotifications } from "../lib/native.js";
 
 export const ACCENTS = [
   ["volt", "#C6F432", "Volt"], ["ember", "#FF6B3D", "Ember"], ["ocean", "#4C8DFF", "Ocean"],
@@ -170,6 +171,18 @@ export function SettingsSheet({ onClose }) {
   const S = store.settings;
   const file = useRef(null);
   const set = p => setStore(s => ({ ...s, settings: { ...s.settings, ...p } }));
+  const [notifPerm, setNotifPerm] = useState("prompt");
+  useEffect(() => { notificationPermission().then(setNotifPerm); }, []);
+  const notifSub = notifPerm === "denied"
+    ? (isNative ? "Blocked — allow in Android Settings › Apps › Mercury" : "Blocked by the browser for this site")
+    : "Alerts you when rest ends while you're away";
+  const toggleNotify = async v => {
+    if (!v) { set({ notify: false }); return; }
+    const p = await requestNotifications();
+    setNotifPerm(p);
+    set({ notify: p !== "denied" });
+    if (p === "denied") flash("Notifications are blocked in system settings", { icon: "info" });
+  };
   const size = useMemo(() => { try { return (localStorage.getItem(STORAGE_KEY) || "").length; } catch { return 0; } }, [store]);
 
   const unitChange = async u => {
@@ -180,12 +193,15 @@ export function SettingsSheet({ onClose }) {
     else return;
     flash(`Units: ${u}`);
   };
-  const exportJSON = () => { downloadFile(`mercury-backup-${todayKey()}.json`, JSON.stringify(store)); flash("Backup downloaded", { icon: "download" }); };
+  const exportJSON = async () => {
+    try { await saveFile(`mercury-backup-${todayKey()}.json`, JSON.stringify(store)); if (!isNative) flash("Backup downloaded", { icon: "download" }); }
+    catch { flash("Backup cancelled", { icon: "info" }); }
+  };
   const exportCSV = () => {
     const rows = [["date", "exercise", "set", "weight", "reps", "unit", "e1rm"]];
     allSets(store).sort((a, b) => a.date.localeCompare(b.date) || a.si - b.si).forEach(s => rows.push([s.date, `"${String(s.ex).replace(/"/g, '""')}"`, s.si + 1, s.w, s.r, S.unit, epley1RM(s.w, s.r)]));
-    downloadFile(`mercury-sets-${todayKey()}.csv`, rows.map(r => r.join(",")).join("\n"), "text/csv");
-    flash("CSV downloaded", { icon: "download" });
+    saveFile(`mercury-sets-${todayKey()}.csv`, rows.map(r => r.join(",")).join("\n"), "text/csv")
+      .then(() => { if (!isNative) flash("CSV downloaded", { icon: "download" }); }).catch(() => {});
   };
   const importJSON = e => {
     const f = e.target.files[0]; e.target.value = "";
@@ -243,6 +259,7 @@ export function SettingsSheet({ onClose }) {
         <Row label="Default rest"><Stepper value={S.restDefault} onChange={v => set({ restDefault: v })} step={15} min={15} max={600} format={fmtTime} /></Row>
         <Row label="Auto-start rest" sub="When you tick a set"><Toggle on={S.autoRest} onChange={v => set({ autoRest: v })} label="Auto-start rest" /></Row>
         <Row label="Rest sound"><Toggle on={S.sound} onChange={v => { set({ sound: v }); if (v) { unlockAudio(); beep(1); } }} label="Rest sound" /></Row>
+        <Row label="Rest notification" sub={notifSub}><Toggle on={S.notify && notifPerm !== "denied"} onChange={toggleNotify} label="Rest notification" /></Row>
         <Row label="Bar weight"><Stepper value={S.bar} onChange={v => set({ bar: v })} step={5} min={0} max={60} format={v => `${v}`} /></Row>
         <Row label="Weekly goal" sub="Sessions per week"><Stepper value={S.weeklyGoal} onChange={v => set({ weeklyGoal: v })} min={1} max={7} /></Row>
       </div>
@@ -358,7 +375,7 @@ export function PhotoSheet({ payload, onClose }) {
   return (
     <Sheet onClose={onClose} title={fmtDate(p.date, { month: "long", day: "numeric", year: "numeric" })}
       footer={<><button className="btn danger lg" onClick={() => { onClose(); undoable("Photo deleted", s => ({ ...s, photos: s.photos.filter(x => p.id ? x.id !== p.id : x.data !== p.data) })); }}><Icon name="trash" size={17} /></button>
-        <button className="btn lg flex1" onClick={() => downloadFile(`mercury-${p.date}.jpg`, dataURLtoBlob(p.data))}><Icon name="download" size={17} /> Save image</button></>}>
+        <button className="btn lg flex1" onClick={() => saveFile(`mercury-${p.date}.jpg`, dataURLtoBlob(p.data), "image/jpeg").catch(() => {})}><Icon name="download" size={17} /> Save image</button></>}>
       <img src={p.data} alt="" style={{ width: "100%", borderRadius: 20 }} />
     </Sheet>
   );

@@ -24,6 +24,11 @@
 
   --nav-h: 64px;
   --gutter: 20px;
+  /* Safe areas: Capacitor (Android) injects --safe-area-inset-*; browsers use env() */
+  --sat: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --sab: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --sal: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
+  --sar: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
 }
 
 /* ---------- Themes ---------- */
@@ -153,10 +158,10 @@ img { display: block; }
   overflow-y: auto; overflow-x: hidden;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: var(--sat);
 }
-.screen { padding: 18px var(--gutter) calc(var(--nav-h) + 48px + env(safe-area-inset-bottom, 0px)); }
-.screen.with-mini { padding-bottom: calc(var(--nav-h) + 112px + env(safe-area-inset-bottom, 0px)); }
+.screen { padding: 18px var(--gutter) calc(var(--nav-h) + 48px + var(--sab)); }
+.screen.with-mini { padding-bottom: calc(var(--nav-h) + 112px + var(--sab)); }
 
 /* ---------- Motion ---------- */
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
@@ -326,7 +331,7 @@ img { display: block; }
 /* ---------- Bottom nav ---------- */
 .nav {
   position: absolute; z-index: 60;
-  left: 12px; right: 12px; bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  left: 12px; right: 12px; bottom: calc(10px + var(--sab));
   height: var(--nav-h);
   display: flex; align-items: center; justify-content: space-around;
   background: var(--glass);
@@ -350,7 +355,7 @@ img { display: block; }
 /* Mini player (live session / rest) */
 .mini {
   position: absolute; z-index: 59;
-  left: 12px; right: 12px; bottom: calc(var(--nav-h) + 18px + env(safe-area-inset-bottom, 0px));
+  left: 12px; right: 12px; bottom: calc(var(--nav-h) + 18px + var(--sab));
   height: 58px; border-radius: 20px;
   display: flex; align-items: center; gap: 12px; padding: 0 8px 0 14px;
   background: var(--glass);
@@ -372,7 +377,7 @@ img { display: block; }
   border-top: 1px solid var(--line-2);
   animation: sheetIn 0.42s var(--ease);
   display: flex; flex-direction: column;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: var(--sab);
 }
 .sheet.tall { height: 94%; max-height: 94%; }
 .grabber { width: 38px; height: 5px; border-radius: 9px; background: var(--t4); margin: 8px auto 2px; flex-shrink: 0; }
@@ -382,7 +387,7 @@ img { display: block; }
 
 /* ---------- Toast ---------- */
 .toast {
-  position: absolute; z-index: 200; left: 50%; top: calc(14px + env(safe-area-inset-top, 0px));
+  position: absolute; z-index: 200; left: 50%; top: calc(14px + var(--sat));
   transform: translateX(-50%);
   display: flex; align-items: center; gap: 12px;
   min-height: 46px; padding: 8px 8px 8px 16px; border-radius: 16px;

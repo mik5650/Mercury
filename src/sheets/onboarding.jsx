@@ -36,7 +36,7 @@ export function Onboarding() {
   ];
 
   return (
-    <div style={{ position: "absolute", inset: 0, zIndex: 300, background: "radial-gradient(120% 60% at 50% 0%, rgba(var(--accent-rgb),0.16), transparent 60%), var(--bg)", display: "flex", flexDirection: "column", padding: "calc(40px + env(safe-area-inset-top, 0px)) 24px calc(24px + env(safe-area-inset-bottom, 0px))", animation: "fade 0.4s ease" }}>
+    <div style={{ position: "absolute", inset: 0, zIndex: 300, background: "radial-gradient(120% 60% at 50% 0%, rgba(var(--accent-rgb),0.16), transparent 60%), var(--bg)", display: "flex", flexDirection: "column", padding: "calc(40px + var(--sat)) 24px calc(24px + var(--sab))", animation: "fade 0.4s ease" }}>
       <div className="row gap-6" style={{ justifyContent: "center", marginBottom: 28 }}>
         {[0, 1, 2, 3].map(i => <span key={i} style={{ height: 4, width: i === step ? 24 : 8, borderRadius: 9, background: i <= step ? "var(--accent)" : "var(--card-3)", transition: "all 0.35s var(--ease)" }} />)}
       </div>

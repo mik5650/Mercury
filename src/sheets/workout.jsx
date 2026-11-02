@@ -5,8 +5,9 @@ import { Icon } from "../ui/icons.jsx";
 import {
   todayKey, addDays, fmtDate, fmtTime, fmtTimeLong, fmtVol, num, uid, entryDone, entryVol, epley1RM,
   exerciseSessions, suggestNext, allSets, EXERCISE_LIBRARY, MUSCLES, MUSCLE_LABEL, guessMuscles,
-  getStreak, sessionTopSets, downloadFile, recomputePRs,
+  getStreak, sessionTopSets, recomputePRs,
 } from "../lib/data.js";
+import { saveFile, shareImage, isNative } from "../lib/native.js";
 import { CARDIO_KINDS } from "../screens/train.jsx";
 
 // ---------- Exercise history ----------
@@ -366,13 +367,16 @@ export function ShareSheet({ payload, onClose }) {
   const fname = `mercury-${s.date}.png`;
   const share = async () => {
     if (!img) return;
-    const file = new File([img.blob], fname, { type: "image/png" });
-    try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: s.day }); return; } }
-    catch (e) { if (e && e.name === "AbortError") return; }
-    downloadFile(fname, img.blob); flash("Image saved", { icon: "download" });
+    try { await shareImage(fname, img.blob, s.day); }
+    catch (e) { if (!e || e.name !== "AbortError") flash("Couldn't share the image", { icon: "info" }); }
+  };
+  const save = async () => {
+    if (!img) return;
+    try { await saveFile(fname, img.blob, "image/png"); if (!isNative) flash("Image saved", { icon: "download" }); }
+    catch { flash("Couldn't save the image", { icon: "info" }); }
   };
   return (
-    <Sheet onClose={onClose} title="Share" footer={<><button className="btn lg" onClick={() => img && (downloadFile(fname, img.blob), flash("Image saved", { icon: "download" }))}><Icon name="download" size={17} /></button><button className="btn primary lg flex1" onClick={share}><Icon name="share" size={17} /> Share</button></>}>
+    <Sheet onClose={onClose} title="Share" footer={<><button className="btn lg" onClick={save} aria-label="Save image"><Icon name="download" size={17} /></button><button className="btn primary lg flex1" onClick={share}><Icon name="share" size={17} /> Share</button></>}>
       <div style={{ aspectRatio: "4/5", borderRadius: 20, overflow: "hidden", background: "var(--card-2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
         {img ? <img src={img.url} alt="Share card" style={{ width: "100%", height: "100%" }} /> : <span className="caption">Rendering…</span>}
       </div>

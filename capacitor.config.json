@@ -1,0 +1,19 @@
+{
+  "appId": "com.mik5650.mercury",
+  "appName": "Mercury",
+  "webDir": "dist",
+  "android": {
+    "backgroundColor": "#08080A"
+  },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "css",
+      "initialViewportFitValueHint": "cover",
+      "style": "DARK"
+    },
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_mercury",
+      "iconColor": "#C6F432"
+    }
+  }
+}

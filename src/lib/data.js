@@ -511,7 +511,7 @@ export function recomputePRs(log) {
 export const DEFAULT_SETTINGS = {
   unit: "lb", theme: "auto", restDefault: 90, autoRest: true, sound: true,
   bar: 45, waterGoal: 8, weeklyGoal: 4, weightGoal: "",
-  accent: "volt", name: "", onboarded: false,
+  accent: "volt", name: "", onboarded: false, notify: true,
 };
 
 export function freshStore(withDemo = true) {

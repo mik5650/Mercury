@@ -10,6 +10,10 @@ import { FuelScreen } from "./screens/fuel.jsx";
 import { BodyScreen } from "./screens/body.jsx";
 import { SheetRouter } from "./sheets/router.jsx";
 import { Onboarding } from "./sheets/onboarding.jsx";
+import {
+  isNative, initNative, setSystemBarsTheme, onBackButton, minimizeApp,
+  notificationPermission, requestNotifications, scheduleRestEnd, cancelRestEnd, showWebRestNotification,
+} from "./lib/native.js";
 
 const TABS = [
   { id: "today", label: "Today", icon: "home" },
@@ -36,6 +40,7 @@ export function App() {
   const [dialog, setDialog] = useState(null);
   const [now, setNow] = useState(Date.now());
   const scrollRef = useRef(null);
+  const [keyboard, setKeyboard] = useState(false);
 
   const setStore = useCallback((updater) => {
     setStoreRaw(prev => {
@@ -78,6 +83,7 @@ export function App() {
       document.documentElement.setAttribute("data-accent", accent || "volt");
       const m = document.querySelector('meta[name="theme-color"]');
       if (m) m.content = t === "dark" ? "#08080A" : "#F2F2F5";
+      setSystemBarsTheme(t);
     };
     apply();
     if (theme !== "auto" || !window.matchMedia) return;
@@ -85,6 +91,33 @@ export function App() {
     mq.addEventListener ? mq.addEventListener("change", apply) : mq.addListener(apply);
     return () => { mq.removeEventListener ? mq.removeEventListener("change", apply) : mq.removeListener(apply); };
   }, [theme, accent]);
+
+  useEffect(() => { initNative(); }, []);
+
+  // Android back button: close the top layer first, then go home, then minimize
+  const layers = useRef({});
+  layers.current = { dialog, sheet, restFull, tab, onboarded: store.settings.onboarded };
+  useEffect(() => onBackButton(() => {
+    const L = layers.current;
+    if (L.dialog) { const r = L.dialog.resolve; setDialog(null); r(L.dialog.input ? null : false); }
+    else if (L.sheet) setSheet(null);
+    else if (L.restFull) setRestFull(false);
+    else if (L.tab !== "today" && L.onboarded) setTab("today");
+    else minimizeApp();
+  }), [setTab]);
+
+  // Hide the floating bars while the on-screen keyboard is open:
+  // on a touch screen, a focused text field means the keyboard is up.
+  useEffect(() => {
+    const touch = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+    if (!touch) return;
+    const isField = el => el && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && !/^(checkbox|radio|range|file|date|button)$/.test(el.type)));
+    const check = () => setKeyboard(isField(document.activeElement));
+    const onOut = () => setTimeout(check, 60);
+    document.addEventListener("focusin", check);
+    document.addEventListener("focusout", onOut);
+    return () => { document.removeEventListener("focusin", check); document.removeEventListener("focusout", onOut); };
+  }, []);
 
   useEffect(() => {
     const full = () => flash("Storage is full — export a backup and remove old photos", { icon: "info" });
@@ -101,6 +134,11 @@ export function App() {
     return () => clearInterval(id);
   }, [!!rest, !!session]);
 
+  const restBody = () => {
+    const s = storeRef.current.activeSession;
+    const label = s && storeRef.current.wo[s.dayKey] ? storeRef.current.wo[s.dayKey].label : null;
+    return label ? `Time for your next set · ${label}` : "Time for your next set.";
+  };
   const restLeft = rest ? Math.max(0, Math.ceil((rest.endAt - now) / 1000)) : 0;
   useEffect(() => {
     if (!rest || rest.endAt > Date.now()) return;
@@ -111,11 +149,37 @@ export function App() {
       if (store.settings.sound) beep(3);
       haptic([120, 60, 120]);
       flash("Rest complete — next set", { icon: "bolt" });
+      if (document.hidden && store.settings.notify) showWebRestNotification(restBody());
     }
   }, [restLeft, rest]);
 
+  // Android: an alarm-backed notification is scheduled for the end of every rest.
+  // While the app is on screen we cancel it just before it fires (the in-app beep covers it).
+  const notify = store.settings.notify;
+  useEffect(() => {
+    if (rest && notify) scheduleRestEnd(rest.endAt, restBody());
+    else cancelRestEnd();
+  }, [rest && rest.endAt, notify]);
+  const cancelledNear = useRef(null);
+  useEffect(() => {
+    if (!rest || !isNative || document.hidden) return;
+    if (rest.endAt - Date.now() < 1200 && cancelledNear.current !== rest.endAt) {
+      cancelledNear.current = rest.endAt;
+      cancelRestEnd();
+    }
+  }, [now]);
+  useEffect(() => {
+    // Leaving the app: make sure the alarm is armed if a rest is still running
+    const vis = () => { if (!document.hidden) return; const r = storeRef.current.activeRest; if (r && storeRef.current.settings.notify) scheduleRestEnd(r.endAt, restBody()); };
+    document.addEventListener("visibilitychange", vis);
+    return () => document.removeEventListener("visibilitychange", vis);
+  }, []);
+
   const startRest = useCallback((sec) => {
     unlockAudio();
+    if (storeRef.current.settings.notify) {
+      notificationPermission().then(p => { if (p === "prompt") requestNotifications(); });
+    }
     setStore(prev => ({ ...prev, activeRest: { endAt: Date.now() + sec * 1000, total: sec } }));
   }, [setStore]);
   const adjustRest = useCallback((d) => {
@@ -125,7 +189,7 @@ export function App() {
 
   const ctx = { store, setStore, flash, undoable, celebrate, open, close, ask, startRest, setTab, tab, now };
 
-  const showMini = !!rest || (!!session && tab !== "train");
+  const showMini = !keyboard && (!!rest || (!!session && tab !== "train"));
   const elapsed = session ? Math.floor((now - session.start) / 1000) : 0;
   const sessionLabel = session && store.wo[session.dayKey] ? store.wo[session.dayKey].label : "Workout";
 
@@ -172,7 +236,7 @@ export function App() {
             </div>
           )}
 
-          <nav className="nav" aria-label="Main">
+          <nav className="nav" aria-label="Main" style={keyboard ? { display: "none" } : undefined}>
             {TABS.map(t => (
               <button key={t.id} className={tab === t.id ? "on" : ""} onClick={() => { setTab(t.id); haptic(5); }} aria-current={tab === t.id ? "page" : undefined}>
                 <span className="nav-ic"><Icon name={t.icon} size={22} stroke={tab === t.id ? 2.1 : 1.8} /></span>
@@ -199,7 +263,7 @@ function RestFull({ left, total, onAdjust, onSkip, onClose }) {
   const pct = left / Math.max(1, total);
   return (
     <div style={{ position: "absolute", inset: 0, zIndex: 95, background: "var(--bg)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 28, animation: "fade 0.25s ease" }}>
-      <button className="icon-btn round" onClick={onClose} style={{ position: "absolute", top: "calc(18px + env(safe-area-inset-top, 0px))", right: 18 }} aria-label="Minimize"><Icon name="chev-d" size={20} /></button>
+      <button className="icon-btn round" onClick={onClose} style={{ position: "absolute", top: "calc(18px + var(--sat))", right: 18 }} aria-label="Minimize"><Icon name="chev-d" size={20} /></button>
       <div className="label" style={{ marginBottom: 26 }}>Rest</div>
       <Ring pct={pct} size={260} stroke={12}>
         <div className="big-num" style={{ fontSize: 72, color: left <= 10 ? "var(--accent-ink)" : "var(--t1)" }}>{fmtTime(left)}</div>

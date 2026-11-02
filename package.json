@@ -1,18 +1,26 @@
 {
   "name": "mercury",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "private": true,
   "description": "Mercury — premium training log",
   "scripts": {
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
-    "serve": "http-server dist -p 5173 -c-1 --silent"
+    "serve": "http-server dist -p 5173 -c-1 --silent",
+    "apk": "node build-apk.mjs"
   },
   "dependencies": {
+    "@capacitor/android": "8.6.0",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/core": "8.6.0",
+    "@capacitor/filesystem": "8.1.5",
+    "@capacitor/local-notifications": "8.3.1",
+    "@capacitor/share": "8.0.3",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "8.6.0",
     "esbuild": "0.24.0",
     "http-server": "14.1.1"
   }
