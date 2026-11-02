@@ -1,0 +1,13 @@
+# Dependencies & build output (GitHub Actions rebuilds dist/)
+node_modules/
+dist/
+
+# Local archives and personal files — not published
+*.zip
+uploads/
+screenshots/
+
+# Editor / tool settings
+.claude/
+.DS_Store
+Thumbs.db
