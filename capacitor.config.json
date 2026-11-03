@@ -10,10 +10,6 @@
       "insetsHandling": "css",
       "initialViewportFitValueHint": "cover",
       "style": "DARK"
-    },
-    "LocalNotifications": {
-      "smallIcon": "ic_stat_mercury",
-      "iconColor": "#C6F432"
     }
   }
 }

@@ -604,7 +604,7 @@ export function loadStore() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const st = migrate(JSON.parse(raw));
+      const st = closeStaleSession(migrate(JSON.parse(raw)));
       saveStore(st);
       return st;
     }
@@ -821,4 +821,24 @@ export function cleanNum(v, decimal = true) {
   let s = String(v ?? "").replace(/,/g, ".").replace(decimal ? /[^0-9.]/g : /[^0-9]/g, "");
   if (decimal) { const i = s.indexOf("."); if (i >= 0) s = s.slice(0, i + 1) + s.slice(i + 1).replace(/\./g, ""); }
   return s;
+}
+
+// A session left open for hours (forgotten overnight) is closed and saved with its sets.
+export const STALE_SESSION_MS = 6 * 3600 * 1000;
+export function closeStaleSession(st) {
+  const s = st.activeSession;
+  if (!s || Date.now() - s.start < STALE_SESSION_MS) return st;
+  const date = dkey(new Date(s.start));
+  const done = Object.values(st.log[date] || {}).filter(entryDone);
+  const day = st.wo[s.dayKey];
+  let sessHist = st.sessHist || [];
+  if (done.length && !sessHist.some(h => h.date === date && (h.dayKey === s.dayKey || (day && h.day === day.label)))) {
+    sessHist = [{
+      date, day: day ? day.label : "Workout", dayKey: s.dayKey,
+      duration: Math.min(2 * 3600, Math.round((Date.now() - s.start) / 1000)),
+      volume: Math.round(done.reduce((a, e) => a + entryVol(e), 0)),
+      exercises: new Set(done.map(e => e.ex)).size, sets: done.length, id: uid(),
+    }, ...sessHist];
+  }
+  return { ...st, activeSession: null, activeRest: null, sessHist };
 }

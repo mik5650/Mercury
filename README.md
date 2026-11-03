@@ -10,8 +10,10 @@ anywhere static (GitHub Pages, Netlify) and "Add to Home Screen" on your phone.
 Download **[apk/Mercury.apk](apk/Mercury.apk)** on the phone and open it to install
 (allow "Install unknown apps" for your browser or Files app when Android asks).
 
-- Rest timer: a notification fires when the rest ends, even with the app in the background
-  or the screen off. Allow notifications on first launch; toggle it in Settings › Rest notification.
+- Rest timer: a heads-up notification fires when the rest ends with the app in the background or
+  the screen off (an exact alarm, handled natively). Allow notifications on first launch; toggle it
+  in Settings › Rest notification.
+- Hold a weight or reps cell and drag down to copy it to the sets below.
 - Backup / CSV / share card open Android's share sheet (save to Drive, Files, send…).
 - Data lives inside the app. To move data from the browser version: Settings › Backup there,
   then Settings › Restore in the app.

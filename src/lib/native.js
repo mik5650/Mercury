@@ -1,25 +1,13 @@
 // Mercury — platform layer: Android (Capacitor) vs. browser.
-// Rest notifications, file export/share, back button, system bar style.
-import { Capacitor, SystemBars, SystemBarsStyle } from "@capacitor/core";
-import { LocalNotifications } from "@capacitor/local-notifications";
+// Rest-end alerts (native RestAlerts plugin), file export/share,
+// back button, system bar style.
+import { Capacitor, SystemBars, SystemBarsStyle, registerPlugin } from "@capacitor/core";
 import { App as CapApp } from "@capacitor/app";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
 
 export const isNative = Capacitor.isNativePlatform();
-const REST_ID = 4201;
-const CHANNEL = "rest-timer";
-
-// ---------- Setup ----------
-export async function initNative() {
-  if (!isNative) return;
-  try {
-    await LocalNotifications.createChannel({
-      id: CHANNEL, name: "Rest timer", description: "Tells you when your rest is over",
-      importance: 5, visibility: 1, vibration: true, lights: true, lightColor: "#C6F432",
-    });
-  } catch {}
-}
+const RestAlerts = registerPlugin("RestAlerts");
 
 // Edge-to-edge (WebView ≥ 140): bars sit over the app, so icons follow the theme.
 // Older WebViews get opaque dark bars (zero insets) — keep the icons light there.
@@ -42,9 +30,11 @@ export function onBackButton(handler) {
 export function minimizeApp() { if (isNative) CapApp.minimizeApp().catch(() => {}); }
 
 // ---------- Notifications ----------
+const normPerm = p => (p === "granted" || p === "denied" ? p : "prompt");
+
 export async function notificationPermission() {
   if (isNative) {
-    try { return (await LocalNotifications.checkPermissions()).display; } catch { return "denied"; }
+    try { return normPerm((await RestAlerts.checkPermissions()).notifications); } catch { return "denied"; }
   }
   if (!("Notification" in window)) return "denied";
   return Notification.permission === "default" ? "prompt" : Notification.permission;
@@ -52,36 +42,23 @@ export async function notificationPermission() {
 
 export async function requestNotifications() {
   if (isNative) {
-    try { return (await LocalNotifications.requestPermissions()).display; } catch { return "denied"; }
+    try { return normPerm((await RestAlerts.requestPermissions()).notifications); } catch { return "denied"; }
   }
   if (!("Notification" in window)) return "denied";
   try { const r = await Notification.requestPermission(); return r === "default" ? "prompt" : r; } catch { return "denied"; }
 }
 
-// Android: schedule a real alarm-backed notification for when the rest ends,
-// so it fires even if the app is in the background or the screen is off.
-export async function scheduleRestEnd(endAt, body) {
-  if (!isNative) return;
-  try {
-    await LocalNotifications.cancel({ notifications: [{ id: REST_ID }] });
-    if (endAt - Date.now() < 1500) return;
-    await LocalNotifications.schedule({
-      notifications: [{
-        id: REST_ID, channelId: CHANNEL,
-        title: "Rest complete", body: body || "Time for your next set.",
-        schedule: { at: new Date(endAt), allowWhileIdle: true },
-        smallIcon: "ic_stat_mercury", iconColor: "#C6F432", autoCancel: true,
-      }],
-    });
-  } catch {}
+// ---------- Rest-end alert (Android) ----------
+// The native side schedules an exact alarm and posts the alert itself, so it fires on time
+// with the app in the background or the screen off.
+export function syncRestAlert(state) {
+  if (isNative) RestAlerts.update({ state }).catch(() => {});
 }
-
-export async function cancelRestEnd() {
-  if (!isNative) return;
-  try {
-    await LocalNotifications.cancel({ notifications: [{ id: REST_ID }] });
-    await LocalNotifications.removeAllDeliveredNotifications();
-  } catch {}
+// event: "resume" | "pause"
+export function onAppState(event, cb) {
+  if (!isNative) return () => {};
+  const p = RestAlerts.addListener(event, cb);
+  return () => { p.then(h => h.remove()); };
 }
 
 // Browser: the page shows its own notification when the rest ends while the tab is hidden.

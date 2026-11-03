@@ -1,5 +1,5 @@
 // Mercury — Train: workout logger + cardio
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp, Seg, Empty, Section, Bars, Ring, NumInput } from "../ui/kit.jsx";
 import { Icon } from "../ui/icons.jsx";
 import {
@@ -261,7 +261,7 @@ function Strength() {
 
 // ============ Exercise card ============
 function ExerciseCard({ ex, ei, n, log, editing, onPatch, onToggle, onSets, onMove, onRemove, onEdit, onRest }) {
-  const { store, open } = useApp();
+  const { store, setStore, open, flash } = useApp();
   const tk = todayKey();
   const unit = store.settings.unit;
   const [wuOpen, setWuOpen] = useState(false);
@@ -299,15 +299,32 @@ function ExerciseCard({ ex, ei, n, log, editing, onPatch, onToggle, onSets, onMo
         <div className="set-head">Set</div><div className="set-head">Previous</div>
         <div className="set-head">{unit}</div><div className="set-head">Reps</div><div />
       </div>
-      <div className="stack" style={{ gap: 4 }}>
-        {Array.from({ length: ex.sets }).map((_, si) => {
+      <FillBlock
+        rows={Array.from({ length: ex.sets }).map((_, si) => {
+          const e = log[setKey(ex.id, si, isB)] || {};
+          const p = ph(isB ? lastB : last, si, !isB);
+          return { w: e.w || (p.w === "" || p.w == null ? "" : String(p.w)), r: e.r || (p.r ? String(p.r) : ""), done: !!e.done };
+        })}
+        onFill={(col, from, to, value, rows) => {
+          let count = 0;
+          for (let i = from; i <= to; i++) if (!rows[i].done) { onPatch(ex, i, isB, { [col]: value }); if (i > from) count++; }
+          if (!store.settings.fillTipSeen) setStore(p => ({ ...p, settings: { ...p.settings, fillTipSeen: true } }));
+          flash(`${col === "w" ? "Weight" : "Reps"} ${value} copied to ${count} set${count === 1 ? "" : "s"}`, { icon: "copy" });
+        }}
+        render={fill => Array.from({ length: ex.sets }).map((_, si) => {
           const k = setKey(ex.id, si, isB);
           const p = ph(isB ? lastB : last, si, !isB);
+          const inFill = fill && si >= fill.from && si <= fill.to && !(log[k] && log[k].done);
           return <SetRow key={k} idx={si + 1} entry={log[k]} ph={p}
+            fill={inFill ? { col: fill.col, value: fill.value, src: si === fill.from } : null}
             onW={v => onPatch(ex, si, isB, { w: v })} onR={v => onPatch(ex, si, isB, { r: v })}
             onToggle={() => onToggle(ex, si, isB, p)} />;
-        })}
-      </div>
+        })} />
+      {ei === 0 && !isB && !store.settings.fillTipSeen && ex.sets > 1 && (
+        <div className="caption row gap-6" style={{ fontSize: 12, marginTop: 8 }}>
+          <Icon name="copy" size={13} /> Tip: hold a weight or reps cell, then drag down to copy it.
+        </div>
+      )}
     </>
   );
 
@@ -385,19 +402,27 @@ function ExerciseCard({ ex, ei, n, log, editing, onPatch, onToggle, onSets, onMo
 }
 
 // Set row — top-level component so inputs keep focus while typing
-function SetRow({ idx, entry, ph, onW, onR, onToggle }) {
+function SetRow({ idx, entry, ph, fill, onW, onR, onToggle }) {
   const e = entry || {};
   const done = !!e.done;
   const prev = ph.prev ? `${ph.prev.w || "BW"} × ${ph.prev.r}` : "—";
+  const cls = col => "set-in" + (fill && fill.col === col ? (fill.src ? " fill-src" : " filling") : "");
+  const shown = (col, v) => (fill && fill.col === col ? fill.value : v || "");
+  // The cell takes the touch while its field is idle (see .set-cell) and focuses it on tap
+  const focusField = ev => { const f = ev.currentTarget.querySelector("input"); if (f && document.activeElement !== f) f.focus(); };
   return (
-    <div className={"set-grid set-row" + (done ? " done" : "")}>
+    <div className={"set-grid set-row" + (done ? " done" : "")} data-fill-idx={idx - 1}>
       <div className="set-idx">{idx}</div>
       <button className="set-prev" onClick={() => { if (ph.prev && !done) { onW(String(ph.prev.w)); onR(String(ph.prev.r)); } }} title="Copy previous">{prev}</button>
-      <NumInput className="set-in" aria-label={`Set ${idx} weight`}
-        placeholder={ph.w === "" || ph.w === undefined ? "—" : String(ph.w)} value={e.w || ""} onChange={onW} />
-      <NumInput className="set-in" decimal={false} aria-label={`Set ${idx} reps`}
-        placeholder={ph.r ? String(ph.r) : "—"} value={e.r || ""} onChange={onR}
-        onKeyDown={ev => { if (ev.key === "Enter") { ev.currentTarget.blur(); onToggle(); } }} />
+      <div className="set-cell" data-fill-col="w" onClick={focusField}>
+        <NumInput className={cls("w")} aria-label={`Set ${idx} weight`}
+          placeholder={ph.w === "" || ph.w === undefined ? "—" : String(ph.w)} value={shown("w", e.w)} onChange={onW} />
+      </div>
+      <div className="set-cell" data-fill-col="r" onClick={focusField}>
+        <NumInput className={cls("r")} decimal={false} aria-label={`Set ${idx} reps`}
+          placeholder={ph.r ? String(ph.r) : "—"} value={shown("r", e.r)} onChange={onR}
+          onKeyDown={ev => { if (ev.key === "Enter") { ev.currentTarget.blur(); onToggle(); } }} />
+      </div>
       <button className={"check" + (done ? " on" : "")} onClick={onToggle} aria-label={done ? `Undo set ${idx}` : `Complete set ${idx}`} aria-pressed={done}>
         <Icon name="check" size={20} stroke={2.6} />
       </button>
@@ -472,4 +497,98 @@ function CardioPanel() {
       )}
     </>
   );
+}
+
+// Hold a weight or reps cell, then drag down: the value is copied to the sets below.
+// Touch: a 380 ms hold arms the gesture; moving earlier lets the page scroll as usual.
+function FillBlock({ rows, onFill, render }) {
+  const ref = useRef(null);
+  const [fill, setFill] = useState(null);
+  const live = useRef({ rows, onFill });
+  live.current = { rows, onFill };
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let g = null; // gesture: { x, y, col, from, to, value, active, timer }
+
+    const begin = (target, x, y) => {
+      const cell = target.closest && target.closest("[data-fill-col]");
+      if (!cell || !el.contains(cell)) return false;
+      const from = +cell.closest("[data-fill-idx]").dataset.fillIdx;
+      const col = cell.dataset.fillCol;
+      const value = live.current.rows[from] && live.current.rows[from][col];
+      if (!value || from >= live.current.rows.length - 1) return false;
+      g = { x, y, col, from, to: from, value, active: false };
+      g.timer = setTimeout(() => {
+        if (!g) return;
+        g.active = true;
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+        haptic(25);
+        setFill({ col, from, to: from, value });
+      }, 380);
+      return true;
+    };
+    const move = (x, y) => {
+      if (!g) return false;
+      if (!g.active) {
+        if (Math.hypot(x - g.x, y - g.y) > 8) { clearTimeout(g.timer); g = null; }
+        return false;
+      }
+      let to = g.from;
+      el.querySelectorAll("[data-fill-idx]").forEach(r => {
+        if (y >= r.getBoundingClientRect().top) to = Math.max(to, +r.dataset.fillIdx);
+      });
+      if (to !== g.to) { g.to = to; haptic(8); setFill({ col: g.col, from: g.from, to, value: g.value }); }
+      return true;
+    };
+    const end = () => {
+      if (!g) return false;
+      clearTimeout(g.timer);
+      const was = g;
+      g = null;
+      if (!was.active) return false;
+      setFill(null);
+      if (was.to > was.from) live.current.onFill(was.col, was.from, was.to, was.value, live.current.rows);
+      return true;
+    };
+
+    // A focused field gets touches itself: hold it back from Android's long-press text selection
+    const ts = e => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      if (begin(e.target, t.clientX, t.clientY) && e.target === document.activeElement) { e.preventDefault(); g.refocus = e.target; }
+    };
+    const tm = e => { const t = e.touches[0]; if (t && move(t.clientX, t.clientY)) e.preventDefault(); };
+    const te = e => {
+      const tap = g && !g.active && g.refocus;
+      if (end()) e.preventDefault();
+      else if (tap) { tap.blur(); tap.focus(); } // a plain tap brings the keyboard back
+    };
+    const cm = e => { if (g) e.preventDefault(); };
+    const md = e => {
+      if (e.button !== 0 || !begin(e.target, e.clientX, e.clientY)) return;
+      const mm = ev => move(ev.clientX, ev.clientY);
+      const mu = () => { end(); window.removeEventListener("mousemove", mm); window.removeEventListener("mouseup", mu); };
+      window.addEventListener("mousemove", mm);
+      window.addEventListener("mouseup", mu);
+    };
+
+    el.addEventListener("touchstart", ts, { passive: false });
+    el.addEventListener("touchmove", tm, { passive: false });
+    el.addEventListener("touchend", te, { passive: false });
+    el.addEventListener("touchcancel", te);
+    el.addEventListener("contextmenu", cm);
+    el.addEventListener("mousedown", md);
+    return () => {
+      el.removeEventListener("touchstart", ts);
+      el.removeEventListener("touchmove", tm);
+      el.removeEventListener("touchend", te);
+      el.removeEventListener("touchcancel", te);
+      el.removeEventListener("contextmenu", cm);
+      el.removeEventListener("mousedown", md);
+    };
+  }, []);
+
+  return <div ref={ref} className="stack" style={{ gap: 4 }}>{render(fill)}</div>;
 }

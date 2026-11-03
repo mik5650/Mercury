@@ -2,7 +2,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppCtx, Toast, Confetti, Ring, Dialog } from "./ui/kit.jsx";
 import { Icon } from "./ui/icons.jsx";
-import { loadStore, saveStore, beep, haptic, unlockAudio, fmtTime } from "./lib/data.js";
+import { loadStore, saveStore, beep, haptic, unlockAudio, fmtTime, todayKey, closeStaleSession } from "./lib/data.js";
+import { restAlertState } from "./lib/restAlert.js";
 import { TodayScreen } from "./screens/today.jsx";
 import { TrainScreen } from "./screens/train.jsx";
 import { ProgressScreen } from "./screens/progress.jsx";
@@ -11,8 +12,9 @@ import { BodyScreen } from "./screens/body.jsx";
 import { SheetRouter } from "./sheets/router.jsx";
 import { Onboarding } from "./sheets/onboarding.jsx";
 import {
-  isNative, initNative, setSystemBarsTheme, onBackButton, minimizeApp,
-  notificationPermission, requestNotifications, scheduleRestEnd, cancelRestEnd, showWebRestNotification,
+  isNative, setSystemBarsTheme, onBackButton, minimizeApp,
+  notificationPermission, requestNotifications, showWebRestNotification,
+  syncRestAlert, onAppState,
 } from "./lib/native.js";
 
 const TABS = [
@@ -41,6 +43,7 @@ export function App() {
   const [now, setNow] = useState(Date.now());
   const scrollRef = useRef(null);
   const [keyboard, setKeyboard] = useState(false);
+  const appActive = useRef(true); // false while the app is in the background
 
   const setStore = useCallback((updater) => {
     setStoreRaw(prev => {
@@ -91,8 +94,6 @@ export function App() {
     mq.addEventListener ? mq.addEventListener("change", apply) : mq.addListener(apply);
     return () => { mq.removeEventListener ? mq.removeEventListener("change", apply) : mq.removeListener(apply); };
   }, [theme, accent]);
-
-  useEffect(() => { initNative(); }, []);
 
   // Android back button: close the top layer first, then go home, then minimize
   const layers = useRef({});
@@ -146,34 +147,41 @@ export function App() {
     setStore(prev => ({ ...prev, activeRest: null }));
     setRestFull(false);
     if (!stale) {
-      if (store.settings.sound) beep(3);
-      haptic([120, 60, 120]);
-      flash("Rest complete — next set", { icon: "bolt" });
-      if (document.hidden && store.settings.notify) showWebRestNotification(restBody());
+      if (appActive.current) {
+        if (store.settings.sound) beep(3);
+        haptic([120, 60, 120]);
+        flash("Rest complete — next set", { icon: "bolt" });
+      } else if (!isNative && store.settings.notify) {
+        showWebRestNotification(restBody());
+      }
     }
   }, [restLeft, rest]);
 
-  // Android: an alarm-backed notification is scheduled for the end of every rest.
-  // While the app is on screen we cancel it just before it fires (the in-app beep covers it).
-  const notify = store.settings.notify;
+  // ===== Rest-end alert (Android) =====
+  // A native exact alarm fires the alert, so it shows on time with the app in the background
+  // and is never removed by the app's own countdown. We send it a snapshot after every change.
+  const closeIfStale = useCallback(() => {
+    const next = closeStaleSession(storeRef.current);
+    if (next !== storeRef.current) setStore(next);
+  }, [setStore]);
   useEffect(() => {
-    if (rest && notify) scheduleRestEnd(rest.endAt, restBody());
-    else cancelRestEnd();
-  }, [rest && rest.endAt, notify]);
-  const cancelledNear = useRef(null);
-  useEffect(() => {
-    if (!rest || !isNative || document.hidden) return;
-    if (rest.endAt - Date.now() < 1200 && cancelledNear.current !== rest.endAt) {
-      cancelledNear.current = rest.endAt;
-      cancelRestEnd();
+    if (isNative) {
+      const offs = [
+        onAppState("resume", () => { appActive.current = true; closeIfStale(); }),
+        onAppState("pause", () => { appActive.current = false; }),
+      ];
+      return () => offs.forEach(off => off());
     }
-  }, [now]);
-  useEffect(() => {
-    // Leaving the app: make sure the alarm is armed if a rest is still running
-    const vis = () => { if (!document.hidden) return; const r = storeRef.current.activeRest; if (r && storeRef.current.settings.notify) scheduleRestEnd(r.endAt, restBody()); };
+    const vis = () => { appActive.current = !document.hidden; if (!document.hidden) closeIfStale(); };
     document.addEventListener("visibilitychange", vis);
     return () => document.removeEventListener("visibilitychange", vis);
-  }, []);
+  }, [closeIfStale]);
+  const todayLog = store.log[todayKey()];
+  useEffect(() => {
+    if (!isNative) return;
+    const t = setTimeout(() => syncRestAlert(restAlertState(storeRef.current)), 150);
+    return () => clearTimeout(t);
+  }, [session, rest, todayLog, store.wo, store.settings]);
 
   const startRest = useCallback((sec) => {
     unlockAudio();

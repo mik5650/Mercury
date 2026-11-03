@@ -26,6 +26,9 @@
 
         </activity>
 
+        <!-- Rest-end alarm -->
+        <receiver android:name=".RestAlertReceiver" android:exported="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

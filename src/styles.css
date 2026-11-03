@@ -444,3 +444,11 @@ img { display: block; }
 .swatch.on { border-color: var(--t1); }
 .plate { border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 800; color: #fff; writing-mode: vertical-rl; }
 .confetti-dot { position: absolute; pointer-events: none; }
+
+/* Hold-and-drag fill. On touch screens an idle field lets touches through to its cell,
+   so a long press arms the fill instead of Android's text selection. */
+.set-cell { display: flex; min-width: 0; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.set-cell > .set-in { flex: 1; min-width: 0; -webkit-touch-callout: none; }
+@media (pointer: coarse) { .set-cell > .set-in:not(:focus) { pointer-events: none; } }
+.set-in.fill-src { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.set-in.filling { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); }
