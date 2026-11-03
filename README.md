@@ -10,10 +10,16 @@ anywhere static (GitHub Pages, Netlify) and "Add to Home Screen" on your phone.
 Download **[apk/Mercury.apk](apk/Mercury.apk)** on the phone and open it to install
 (allow "Install unknown apps" for your browser or Files app when Android asks).
 
-- Rest timer: a heads-up notification fires when the rest ends with the app in the background or
-  the screen off (an exact alarm, handled natively). Allow notifications on first launch; toggle it
-  in Settings › Rest notification.
+- Rest timer outside the app: a silent live countdown (lock screen too) with **+30 s** and **Skip**,
+  then a heads-up alert when the rest ends — even with the screen off. Allow notifications on first
+  launch; toggle it in Settings › Rest notification.
 - Hold a weight or reps cell and drag down to copy it to the sets below.
+- Tap a set number to mark it warm-up, drop set or failure and note its RPE. Warm-ups stay out of
+  volume, records and progression.
+- Weekly auto-backup to `Documents/Mercury` on the phone (keeps the last 4). After a reinstall,
+  Settings › Restore and pick the newest file.
+- Health Connect (Settings): finished workouts, estimated active calories and weigh-ins are sent to
+  your health app. Write-only.
 - Backup / CSV / share card open Android's share sheet (save to Drive, Files, send…).
 - Data lives inside the app. To move data from the browser version: Settings › Backup there,
   then Settings › Restore in the app.

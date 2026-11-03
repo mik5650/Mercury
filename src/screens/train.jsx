@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp, Seg, Empty, Section, Bars, Ring, NumInput } from "../ui/kit.jsx";
 import { Icon } from "../ui/icons.jsx";
 import {
-  todayKey, addDays, weekStart, fmtDate, fmtTime, fmtVol, num, uid, setKey, entryDone, entryVol, epley1RM,
+  todayKey, addDays, weekStart, fmtDate, fmtTime, fmtVol, num, uid, setKey, entryDone, entryWork, entryVol, epley1RM,
+  SET_TYPES, RPE_VALUES,
   parseRepRange, lastPerformance, suggestNext, warmupSets, recomputePRs, haptic, unlockAudio,
   dayKeys, suggestedDay, withDayAggregates, daySetCount, estimateMinutes, exerciseMuscles, MUSCLE_LABEL,
   EXERCISE_LIBRARY,
@@ -64,7 +65,7 @@ function Strength() {
     const name = isB ? ex.nameB : ex.name;
     const cur = day[key] || { ex: name, si, w: "", r: "", done: false, ...(isB ? { b: true } : {}) };
     const next = { ...cur, ...patch, ex: name };
-    if (next.w === "" && next.r === "" && !next.done) delete day[key]; else day[key] = next;
+    if (next.w === "" && next.r === "" && !next.done && !next.t && !next.rpe) delete day[key]; else day[key] = next;
     return withDayAggregates({ ...prev, log: { ...prev.log, [tk]: day } }, tk, dayKey);
   });
 
@@ -93,7 +94,13 @@ function Strength() {
     if (w === "" && !(lib && lib.eq === "bodyweight")) { flash("Enter the weight first", { icon: "info" }); return; }
     const old = store.prs[name];
     const e1 = epley1RM(w, r);
-    const isPR = num(w) > 0 && (!old || e1 > (old.e1rm || 0));
+    const isPR = num(w) > 0 && cur.t !== "w" && (!old || e1 > (old.e1rm || 0));
+    // Last set of the exercise → a stronger buzz (the card celebrates and folds itself)
+    let left = 0;
+    for (let i = 0; i < ex.sets; i++) {
+      if (!entryDone(log[setKey(ex.id, i, false)]) && !(i === si && !isB)) left++;
+      if (ex.isSuperset && !entryDone(log[setKey(ex.id, i, true)]) && !(i === si && isB)) left++;
+    }
     setStore(prev => {
       const day = { ...(prev.log[tk] || {}) };
       day[key] = { ...(day[key] || {}), ex: name, si, w: String(w), r: String(r), done: true, ...(isB ? { b: true } : {}) };
@@ -102,7 +109,7 @@ function Strength() {
       if (!st.activeSession) st = { ...st, activeSession: { start: Date.now(), dayKey } };
       return st;
     });
-    haptic(20);
+    haptic(left ? [18, 40, 26] : [30, 60, 30, 60, 90]);
     if (isPR && old) { celebrate(); haptic([60, 40, 140]); flash(`New record · ${name} ${w}×${r}`, { icon: "trophy" }); }
     if (S.autoRest) startRest(ex.rest || S.restDefault);
   };
@@ -124,7 +131,7 @@ function Strength() {
     const vol = Math.round(doneSets.reduce((a, e) => a + entryVol(e), 0));
     const names = [...new Set(doneSets.map(e => e.ex))];
     const prs = Object.entries(store.prs).filter(([n, p]) => p.date === tk && !p.first && names.includes(n));
-    const entry = { date: tk, day: workout.label, dayKey, duration, volume: vol, exercises: names.length, sets: doneSets.length, id: uid() };
+    const entry = { date: tk, day: workout.label, dayKey, duration, volume: vol, exercises: names.length, sets: doneSets.length, id: uid(), start: session ? session.start : Date.now() - duration * 1000 };
     setStore(prev => ({
       ...prev, activeSession: null, activeRest: null,
       hist: { ...prev.hist, [tk]: true }, volHist: { ...prev.volHist, [tk]: vol },
@@ -206,7 +213,7 @@ function Strength() {
         </div>
         <div className="row gap-16 caption" style={{ marginBottom: 16, fontWeight: 600 }}>
           <span><span className="num" style={{ color: "var(--t1)" }}>{done}</span>/{total} sets</span>
-          <span><span className="num" style={{ color: "var(--t1)" }}>{fmtVol(todayVol)}</span> {unit}</span>
+          <span><span key={Math.round(todayVol)} className={"num" + (todayVol ? " bump" : "")} style={{ color: "var(--t1)" }}>{fmtVol(todayVol)}</span> {unit}</span>
           {!session && <span>~{estimateMinutes(workout, S.restDefault)} min</span>}
         </div>
         {session ? (
@@ -284,6 +291,22 @@ function ExerciseCard({ ex, ei, n, log, editing, onPatch, onToggle, onSets, onMo
   const barbell = lib ? lib.eq === "barbell" : /squat|press|deadlift|row|bench/i.test(ex.name);
   const wu = barbell ? warmupSets(topW, unit, store.settings.bar) : [];
 
+  // A finished exercise folds into one line, after a short celebration; tap to open it again
+  const [expanded, setExpanded] = useState(false);
+  const [cheer, setCheer] = useState(false);
+  const wasComplete = useRef(complete);
+  useEffect(() => {
+    const was = wasComplete.current;
+    wasComplete.current = complete;
+    if (!complete || was) return;
+    setExpanded(false);
+    setCheer(true);
+    const t = setTimeout(() => setCheer(false), 1100);
+    return () => clearTimeout(t);
+  }, [complete]);
+  // (the render that completes it already counts as celebrating, before the effect runs)
+  const folded = complete && !expanded && !cheer && wasComplete.current && !editing;
+
   const ph = (lp, si, useSug) => {
     const prev = lp ? (lp.sets[si] || lp.sets[lp.sets.length - 1]) : null;
     return {
@@ -292,6 +315,26 @@ function ExerciseCard({ ex, ei, n, log, editing, onPatch, onToggle, onSets, onMo
       r: useSug && sug && sug.r ? sug.r : prev ? prev.r : range ? range[0] : "",
     };
   };
+
+  if (folded) {
+    const work = Object.values(log).filter(e => e.ex === ex.name && entryWork(e));
+    const top = work.reduce((b, e) => (!b || epley1RM(e.w, e.r) > epley1RM(b.w, b.r) ? e : b), null);
+    return (
+      <button className="card ex-card ex-folded" onClick={() => { setExpanded(true); haptic(5); }} aria-label={`${ex.name} done, show sets`}>
+        <span className="ex-folded-check"><Icon name="check" size={16} stroke={2.8} /></span>
+        <div className="flex1" style={{ minWidth: 0, textAlign: "left" }}>
+          <div className="row gap-8">
+            <span className="h-card ellipsis">{ex.name}{ex.isSuperset && ex.nameB ? ` + ${ex.nameB}` : ""}</span>
+            {prToday && <span className="pill solid"><Icon name="trophy" size={11} /> PR</span>}
+          </div>
+          <div className="caption num" style={{ marginTop: 2 }}>
+            {dA + dB} sets{top ? ` · top ${num(top.w) || "BW"} × ${num(top.r)}` : ""}
+          </div>
+        </div>
+        <Icon name="chev-d" size={18} />
+      </button>
+    );
+  }
 
   const block = (isB) => (
     <>
@@ -318,18 +361,19 @@ function ExerciseCard({ ex, ei, n, log, editing, onPatch, onToggle, onSets, onMo
           return <SetRow key={k} idx={si + 1} entry={log[k]} ph={p}
             fill={inFill ? { col: fill.col, value: fill.value, src: si === fill.from } : null}
             onW={v => onPatch(ex, si, isB, { w: v })} onR={v => onPatch(ex, si, isB, { r: v })}
+            onMeta={patch => onPatch(ex, si, isB, patch)}
             onToggle={() => onToggle(ex, si, isB, p)} />;
         })} />
       {ei === 0 && !isB && !store.settings.fillTipSeen && ex.sets > 1 && (
         <div className="caption row gap-6" style={{ fontSize: 12, marginTop: 8 }}>
-          <Icon name="copy" size={13} /> Tip: hold a weight or reps cell, then drag down to copy it.
+          <Icon name="copy" size={13} /> Tip: hold a weight or reps cell, then drag down to copy it. Tap a set number for warm-up, drop set or RPE.
         </div>
       )}
     </>
   );
 
   return (
-    <div className="card ex-card" style={prToday ? { animation: "glowPulse 1.6s ease" } : undefined}>
+    <div className={"card ex-card" + (cheer || (complete && !wasComplete.current) ? " cheer" : "")} style={prToday && !cheer ? { animation: "glowPulse 1.6s ease" } : undefined}>
       <div className="row" style={{ alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
         <button className="flex1" style={{ textAlign: "left" }} onClick={() => open("exercise", { name: ex.name, reps: ex.reps })}>
           <div className="row gap-8" style={{ flexWrap: "wrap" }}>
@@ -351,7 +395,10 @@ function ExerciseCard({ ex, ei, n, log, editing, onPatch, onToggle, onSets, onMo
             <button className="icon-btn sm" style={{ color: "var(--bad)" }} onClick={onRemove} aria-label="Remove"><Icon name="trash" size={15} /></button>
           </div>
         ) : (
-          <button className="icon-btn sm ghost" onClick={onEdit} aria-label="Exercise options"><Icon name="dots" size={18} /></button>
+          <div className="row gap-4">
+            {complete && <button className="icon-btn sm ghost" onClick={() => setExpanded(false)} aria-label="Fold"><Icon name="chev-u" size={18} /></button>}
+            <button className="icon-btn sm ghost" onClick={onEdit} aria-label="Exercise options"><Icon name="dots" size={18} /></button>
+          </div>
         )}
       </div>
 
@@ -401,32 +448,69 @@ function ExerciseCard({ ex, ei, n, log, editing, onPatch, onToggle, onSets, onMo
   );
 }
 
-// Set row — top-level component so inputs keep focus while typing
-function SetRow({ idx, entry, ph, fill, onW, onR, onToggle }) {
+// Set row — top-level component so inputs keep focus while typing.
+// Tap the set number to mark it warm-up / drop / failure and note the RPE.
+function SetRow({ idx, entry, ph, fill, onW, onR, onToggle, onMeta }) {
   const e = entry || {};
   const done = !!e.done;
+  const [meta, setMeta] = useState(false);
+  // Brief highlight when the set gets ticked
+  const [pop, setPop] = useState(false);
+  const wasDone = useRef(done);
+  useEffect(() => {
+    const was = wasDone.current;
+    wasDone.current = done;
+    if (!done || was) return;
+    setPop(true);
+    const t = setTimeout(() => setPop(false), 700);
+    return () => clearTimeout(t);
+  }, [done]);
   const prev = ph.prev ? `${ph.prev.w || "BW"} × ${ph.prev.r}` : "—";
   const cls = col => "set-in" + (fill && fill.col === col ? (fill.src ? " fill-src" : " filling") : "");
   const shown = (col, v) => (fill && fill.col === col ? fill.value : v || "");
+  // An empty cell shows a suggestion (last time / progression) as its placeholder
+  const sug = (col, v, p) => (!done && !v && p !== "" && p !== undefined && p !== null ? " sug" : "");
   // The cell takes the touch while its field is idle (see .set-cell) and focuses it on tap
   const focusField = ev => { const f = ev.currentTarget.querySelector("input"); if (f && document.activeElement !== f) f.focus(); };
+  const type = e.t && SET_TYPES[e.t];
   return (
-    <div className={"set-grid set-row" + (done ? " done" : "")} data-fill-idx={idx - 1}>
-      <div className="set-idx">{idx}</div>
-      <button className="set-prev" onClick={() => { if (ph.prev && !done) { onW(String(ph.prev.w)); onR(String(ph.prev.r)); } }} title="Copy previous">{prev}</button>
-      <div className="set-cell" data-fill-col="w" onClick={focusField}>
-        <NumInput className={cls("w")} aria-label={`Set ${idx} weight`}
-          placeholder={ph.w === "" || ph.w === undefined ? "—" : String(ph.w)} value={shown("w", e.w)} onChange={onW} />
+    <>
+      <div className={"set-grid set-row" + (done ? " done" : "") + (pop ? " pop" : "") + (e.t === "w" ? " warm" : "")} data-fill-idx={idx - 1}>
+        <button className={"set-idx" + (type ? " typed" : "") + (meta ? " open" : "")} onClick={() => { setMeta(m => !m); haptic(5); }}
+          aria-label={`Set ${idx} type and RPE`} aria-expanded={meta}>
+          <span>{type ? type.short : idx}</span>
+          {e.rpe ? <span className="set-rpe">@{e.rpe}</span> : null}
+        </button>
+        <button className="set-prev" onClick={() => { if (ph.prev && !done) { onW(String(ph.prev.w)); onR(String(ph.prev.r)); } }} title="Copy previous">{prev}</button>
+        <div className={"set-cell" + sug("w", e.w, ph.w)} data-fill-col="w" onClick={focusField}>
+          <NumInput className={cls("w")} aria-label={`Set ${idx} weight`}
+            placeholder={ph.w === "" || ph.w === undefined ? "—" : String(ph.w)} value={shown("w", e.w)} onChange={onW} />
+        </div>
+        <div className={"set-cell" + sug("r", e.r, ph.r)} data-fill-col="r" onClick={focusField}>
+          <NumInput className={cls("r")} decimal={false} aria-label={`Set ${idx} reps`}
+            placeholder={ph.r ? String(ph.r) : "—"} value={shown("r", e.r)} onChange={onR}
+            onKeyDown={ev => { if (ev.key === "Enter") { ev.currentTarget.blur(); onToggle(); } }} />
+        </div>
+        <button className={"check" + (done ? " on" : "")} onClick={onToggle} aria-label={done ? `Undo set ${idx}` : `Complete set ${idx}`} aria-pressed={done}>
+          <Icon name="check" size={20} stroke={2.6} />
+        </button>
       </div>
-      <div className="set-cell" data-fill-col="r" onClick={focusField}>
-        <NumInput className={cls("r")} decimal={false} aria-label={`Set ${idx} reps`}
-          placeholder={ph.r ? String(ph.r) : "—"} value={shown("r", e.r)} onChange={onR}
-          onKeyDown={ev => { if (ev.key === "Enter") { ev.currentTarget.blur(); onToggle(); } }} />
-      </div>
-      <button className={"check" + (done ? " on" : "")} onClick={onToggle} aria-label={done ? `Undo set ${idx}` : `Complete set ${idx}`} aria-pressed={done}>
-        <Icon name="check" size={20} stroke={2.6} />
-      </button>
-    </div>
+      {meta && (
+        <div className="set-meta">
+          <div className="set-meta-row">
+            {[["", "Working"], ...Object.entries(SET_TYPES).map(([k, t]) => [k, t.label])].map(([k, label]) => (
+              <button key={k || "n"} className={"chip sm" + ((e.t || "") === k ? " on" : "")} onClick={() => { onMeta({ t: k || undefined }); haptic(5); }}>{label}</button>
+            ))}
+          </div>
+          <div className="set-meta-row">
+            <span className="caption" style={{ fontWeight: 650, marginRight: 2 }}>RPE</span>
+            {RPE_VALUES.map(v => (
+              <button key={v} className={"chip sm num" + (e.rpe === v ? " on" : "")} onClick={() => { onMeta({ rpe: e.rpe === v ? undefined : v }); haptic(5); }}>{v}</button>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

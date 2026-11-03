@@ -4,6 +4,7 @@ import { AppCtx, Toast, Confetti, Ring, Dialog } from "./ui/kit.jsx";
 import { Icon } from "./ui/icons.jsx";
 import { loadStore, saveStore, beep, haptic, unlockAudio, fmtTime, todayKey, closeStaleSession } from "./lib/data.js";
 import { restAlertState } from "./lib/restAlert.js";
+import { syncHealth } from "./lib/health.js";
 import { TodayScreen } from "./screens/today.jsx";
 import { TrainScreen } from "./screens/train.jsx";
 import { ProgressScreen } from "./screens/progress.jsx";
@@ -14,7 +15,7 @@ import { Onboarding } from "./sheets/onboarding.jsx";
 import {
   isNative, setSystemBarsTheme, onBackButton, minimizeApp,
   notificationPermission, requestNotifications, showWebRestNotification,
-  syncRestAlert, onAppState,
+  syncRestAlert, onAppState, takeRestChange, onRestChange, writeAutoBackup,
 } from "./lib/native.js";
 
 const TABS = [
@@ -85,7 +86,7 @@ export function App() {
       document.documentElement.setAttribute("data-theme", t);
       document.documentElement.setAttribute("data-accent", accent || "volt");
       const m = document.querySelector('meta[name="theme-color"]');
-      if (m) m.content = t === "dark" ? "#08080A" : "#F2F2F5";
+      if (m) m.content = t === "dark" ? "#000000" : "#F2F2F5";
       setSystemBarsTheme(t);
     };
     apply();
@@ -164,18 +165,59 @@ export function App() {
     const next = closeStaleSession(storeRef.current);
     if (next !== storeRef.current) setStore(next);
   }, [setStore]);
+  // ===== Weekly automatic backup (Android): a copy in Documents/Mercury =====
+  const AUTO_BACKUP_EVERY = 7 * 24 * 3600 * 1000;
+  const autoBackup = useCallback(async (force = false) => {
+    const st = storeRef.current;
+    const S = st.settings;
+    if (!isNative || !S.onboarded || (!force && (!S.autoBackup || Date.now() - (S.lastAutoBackup || 0) < AUTO_BACKUP_EVERY))) return null;
+    try {
+      const at = Date.now();
+      const path = await writeAutoBackup(JSON.stringify({ ...st, settings: { ...S, lastAutoBackup: at } }), todayKey());
+      setStore(prev => ({ ...prev, settings: { ...prev.settings, lastAutoBackup: at, lastAutoBackupPath: path } }));
+      return path;
+    } catch {
+      return null;
+    }
+  }, [setStore]);
+  useEffect(() => { const t = setTimeout(() => autoBackup(), 4000); return () => clearTimeout(t); }, [autoBackup]);
+
+  // ===== Health Connect: send new workouts and weigh-ins =====
+  const healthSync = useCallback(async () => {
+    const r = await syncHealth(storeRef.current);
+    if (r.error === "no-access") {
+      setStore(prev => ({ ...prev, settings: { ...prev.settings, health: false } }));
+      flash("Health Connect access was removed — sync turned off", { icon: "info" });
+    }
+    return r;
+  }, [setStore, flash]);
+  useEffect(() => {
+    if (!isNative || !store.settings.health) return;
+    const t = setTimeout(healthSync, 2500);
+    return () => clearTimeout(t);
+  }, [store.sessHist, store.weights, store.settings.health, healthSync]);
+
+  // +30 s / Skip pressed on the notification
+  const applyRestChange = useCallback(async () => {
+    const r = await takeRestChange();
+    if (!r) return;
+    setStore(prev => ({ ...prev, activeRest: r.endAt > Date.now() ? { endAt: r.endAt, total: Math.max(1, r.total) } : null }));
+    if (!(r.endAt > Date.now())) setRestFull(false);
+  }, [setStore]);
   useEffect(() => {
     if (isNative) {
+      applyRestChange();
       const offs = [
-        onAppState("resume", () => { appActive.current = true; closeIfStale(); }),
+        onAppState("resume", () => { appActive.current = true; closeIfStale(); applyRestChange(); autoBackup(); }),
         onAppState("pause", () => { appActive.current = false; }),
+        onRestChange(applyRestChange),
       ];
       return () => offs.forEach(off => off());
     }
     const vis = () => { appActive.current = !document.hidden; if (!document.hidden) closeIfStale(); };
     document.addEventListener("visibilitychange", vis);
     return () => document.removeEventListener("visibilitychange", vis);
-  }, [closeIfStale]);
+  }, [closeIfStale, applyRestChange, autoBackup]);
   const todayLog = store.log[todayKey()];
   useEffect(() => {
     if (!isNative) return;
@@ -195,7 +237,7 @@ export function App() {
   }, [setStore]);
   const skipRest = useCallback(() => { setStore(prev => ({ ...prev, activeRest: null })); setRestFull(false); }, [setStore]);
 
-  const ctx = { store, setStore, flash, undoable, celebrate, open, close, ask, startRest, setTab, tab, now };
+  const ctx = { store, setStore, flash, undoable, celebrate, open, close, ask, startRest, setTab, tab, now, autoBackup, healthSync };
 
   const showMini = !keyboard && (!!rest || (!!session && tab !== "train"));
   const elapsed = session ? Math.floor((now - session.start) / 1000) : 0;

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useApp, Sheet, Seg, Stepper, Toggle, LineChart, Empty, SearchField, Stat } from "../ui/kit.jsx";
 import { Icon } from "../ui/icons.jsx";
 import {
-  todayKey, addDays, fmtDate, fmtTime, fmtTimeLong, fmtVol, num, uid, entryDone, entryVol, epley1RM,
+  todayKey, addDays, fmtDate, fmtTime, fmtTimeLong, fmtVol, num, uid, entryDone, entryVol, epley1RM, SET_TYPES,
   exerciseSessions, suggestNext, allSets, EXERCISE_LIBRARY, MUSCLES, MUSCLE_LABEL, guessMuscles,
   getStreak, sessionTopSets, recomputePRs,
 } from "../lib/data.js";
@@ -128,7 +128,11 @@ export function DaySheet({ payload, onClose }) {
           {Object.entries(by).map(([n, arr]) => (
             <button key={n} className="list-row tap" style={{ flexDirection: "column", alignItems: "flex-start", gap: 6, padding: "12px 16px" }} onClick={() => { onClose(); open("exercise", { name: n }); }}>
               <span style={{ fontWeight: 650 }}>{n}</span>
-              <div className="row gap-6" style={{ flexWrap: "wrap" }}>{arr.map((e, i) => <span key={i} className="pill num" style={{ height: 24, fontSize: 12 }}>{num(e.w) || "BW"} × {num(e.r)}</span>)}</div>
+              <div className="row gap-6" style={{ flexWrap: "wrap" }}>{arr.map((e, i) => (
+                <span key={i} className="pill num" style={{ height: 24, fontSize: 12, opacity: e.t === "w" ? 0.55 : 1 }}>
+                  {e.t && <b style={{ color: "var(--accent-ink)", marginRight: 4 }}>{SET_TYPES[e.t].short}</b>}{num(e.w) || "BW"} × {num(e.r)}{e.rpe ? ` @${e.rpe}` : ""}
+                </span>
+              ))}</div>
             </button>
           ))}
         </div>

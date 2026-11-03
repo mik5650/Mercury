@@ -3,10 +3,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp, Sheet, Seg, Stepper, Toggle, Empty, Stat, NumInput } from "../ui/kit.jsx";
 import { Icon } from "../ui/icons.jsx";
 import {
-  todayKey, addDays, weekStart, parseKey, daysBetween, fmtDate, fmtTime, num, platesFor, warmupSets, epley1RM,
-  allSets, convertUnits, migrate, freshStore, unlockAudio, beep, STORAGE_KEY,
+  todayKey, dkey, addDays, weekStart, parseKey, daysBetween, fmtDate, fmtTime, num, platesFor, warmupSets, epley1RM,
+  allSets, convertUnits, migrate, freshStore, unlockAudio, beep, STORAGE_KEY, SET_TYPES,
 } from "../lib/data.js";
 import { saveFile, isNative, notificationPermission, requestNotifications } from "../lib/native.js";
+import { healthAvailability, healthHasAccess, requestHealthAccess, openHealthSettings } from "../lib/health.js";
 
 export const ACCENTS = [
   ["volt", "#C6F432", "Volt"], ["ember", "#FF6B3D", "Ember"], ["ocean", "#4C8DFF", "Ocean"],
@@ -167,7 +168,7 @@ function Row({ label, sub, children }) {
 }
 
 export function SettingsSheet({ onClose }) {
-  const { store, setStore, flash, ask } = useApp();
+  const { store, setStore, flash, ask, autoBackup } = useApp();
   const S = store.settings;
   const file = useRef(null);
   const set = p => setStore(s => ({ ...s, settings: { ...s.settings, ...p } }));
@@ -182,6 +183,17 @@ export function SettingsSheet({ onClose }) {
     setNotifPerm(p);
     set({ notify: p !== "denied" });
     if (p === "denied") flash("Notifications are blocked in system settings", { icon: "info" });
+  };
+  // Health Connect
+  const [hc, setHc] = useState("unavailable");
+  useEffect(() => { healthAvailability().then(setHc); }, []);
+  const toggleHealth = async v => {
+    if (!v) { set({ health: false }); return; }
+    if (hc === "update") { openHealthSettings(); flash("Install or update Health Connect, then try again", { icon: "info" }); return; }
+    const ok = (await healthHasAccess()) || (await requestHealthAccess());
+    if (!ok) { flash("Health Connect access wasn't granted", { icon: "info" }); return; }
+    set({ health: true });
+    flash("Health Connect on — sending your workouts", { icon: "check" });
   };
   const size = useMemo(() => { try { return (localStorage.getItem(STORAGE_KEY) || "").length; } catch { return 0; } }, [store]);
 
@@ -198,8 +210,10 @@ export function SettingsSheet({ onClose }) {
     catch { flash("Backup cancelled", { icon: "info" }); }
   };
   const exportCSV = () => {
-    const rows = [["date", "exercise", "set", "weight", "reps", "unit", "e1rm"]];
-    allSets(store).sort((a, b) => a.date.localeCompare(b.date) || a.si - b.si).forEach(s => rows.push([s.date, `"${String(s.ex).replace(/"/g, '""')}"`, s.si + 1, s.w, s.r, S.unit, epley1RM(s.w, s.r)]));
+    const rows = [["date", "exercise", "set", "type", "weight", "reps", "rpe", "unit", "e1rm"]];
+    allSets(store, true).sort((a, b) => a.date.localeCompare(b.date) || a.si - b.si).forEach(s => rows.push([
+      s.date, `"${String(s.ex).replace(/"/g, '""')}"`, s.si + 1, s.t ? SET_TYPES[s.t].label : "Working", s.w, s.r, s.rpe, S.unit, s.t === "w" ? "" : epley1RM(s.w, s.r),
+    ]));
     saveFile(`mercury-sets-${todayKey()}.csv`, rows.map(r => r.join(",")).join("\n"), "text/csv")
       .then(() => { if (!isNative) flash("CSV downloaded", { icon: "download" }); }).catch(() => {});
   };
@@ -260,6 +274,17 @@ export function SettingsSheet({ onClose }) {
         <Row label="Auto-start rest" sub="When you tick a set"><Toggle on={S.autoRest} onChange={v => set({ autoRest: v })} label="Auto-start rest" /></Row>
         <Row label="Rest sound"><Toggle on={S.sound} onChange={v => { set({ sound: v }); if (v) { unlockAudio(); beep(1); } }} label="Rest sound" /></Row>
         <Row label="Rest notification" sub={notifSub}><Toggle on={S.notify && notifPerm !== "denied"} onChange={toggleNotify} label="Rest notification" /></Row>
+        {isNative && hc !== "unavailable" && (
+          <Row label="Health Connect" sub={S.health ? "Workouts and weigh-ins are sent automatically" : "Send workouts, calories and weigh-ins to your health app"}>
+            <Toggle on={!!S.health} onChange={toggleHealth} label="Health Connect" />
+          </Row>
+        )}
+        {isNative && S.health && (
+          <button className="list-row" style={{ width: "100%", textAlign: "left" }} onClick={openHealthSettings}>
+            <div className="flex1" style={{ fontWeight: 600 }}>Manage Health Connect access</div>
+            <Icon name="chev-r" size={18} />
+          </button>
+        )}
         <Row label="Bar weight"><Stepper value={S.bar} onChange={v => set({ bar: v })} step={5} min={0} max={60} format={v => `${v}`} /></Row>
         <Row label="Weekly goal" sub="Sessions per week"><Stepper value={S.weeklyGoal} onChange={v => set({ weeklyGoal: v })} min={1} max={7} /></Row>
       </div>
@@ -275,6 +300,20 @@ export function SettingsSheet({ onClose }) {
         <div className="row between caption" style={{ marginBottom: 8 }}><span>Stored on this device</span><span className="num">{(size / 1048576).toFixed(2)} / ~5 MB</span></div>
         <div className="bar"><div style={{ width: `${Math.min(100, size / 52428.8)}%`, background: size > 4e6 ? "var(--bad)" : "var(--good)" }} /></div>
       </div>
+      {isNative && (
+        <div className="list" style={{ marginBottom: 8 }}>
+          <Row label="Weekly auto-backup" sub={S.lastAutoBackup ? `Last ${fmtDate(dkey(new Date(S.lastAutoBackup)), { month: "short", day: "numeric" })} · Documents/Mercury` : "Saved to Documents/Mercury on your phone"}>
+            <Toggle on={S.autoBackup} onChange={v => set({ autoBackup: v })} label="Weekly auto-backup" />
+          </Row>
+          <button className="list-row" style={{ width: "100%", textAlign: "left" }} onClick={async () => {
+            const path = await autoBackup(true);
+            flash(path ? "Backup saved to Documents/Mercury" : "Couldn't save the backup", { icon: path ? "check" : "info" });
+          }}>
+            <div className="flex1"><div style={{ fontWeight: 600 }}>Back up now</div><div className="caption" style={{ fontSize: 12 }}>Restore picks it up from Documents/Mercury</div></div>
+            <Icon name="download" size={18} />
+          </button>
+        </div>
+      )}
       <div className="grid-2" style={{ gap: 8, marginBottom: 8 }}>
         <button className="btn" onClick={exportJSON}><Icon name="download" size={16} /> Backup</button>
         <button className="btn" onClick={() => file.current?.click()}><Icon name="upload" size={16} /> Restore</button>
@@ -282,7 +321,7 @@ export function SettingsSheet({ onClose }) {
         <button className="btn" onClick={() => reset(true)}><Icon name="sparkle" size={16} /> Demo data</button>
       </div>
       <button className="btn danger block" onClick={() => reset(false)}>Erase everything</button>
-      <div className="caption" style={{ textAlign: "center", marginTop: 16, lineHeight: 1.5 }}>Mercury 3.0 · Your data never leaves this device.<br />Back up before clearing browser data or switching phones.</div>
+      <div className="caption" style={{ textAlign: "center", marginTop: 16, lineHeight: 1.5 }}>Mercury 3.3 · Your data stays on this device.<br />Back up before clearing browser data or switching phones.</div>
     </Sheet>
   );
 }

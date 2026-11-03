@@ -48,11 +48,21 @@ export async function requestNotifications() {
   try { const r = await Notification.requestPermission(); return r === "default" ? "prompt" : r; } catch { return "denied"; }
 }
 
-// ---------- Rest-end alert (Android) ----------
-// The native side schedules an exact alarm and posts the alert itself, so it fires on time
-// with the app in the background or the screen off.
+// ---------- Rest timer outside the app (Android) ----------
+// The native side shows the live countdown, schedules an exact alarm and posts the alert itself,
+// so it all works with the app in the background or the screen off.
 export function syncRestAlert(state) {
   if (isNative) RestAlerts.update({ state }).catch(() => {});
+}
+// Rest changed from the notification (+30 s / Skip) while the app was away → { endAt, total } | null
+export async function takeRestChange() {
+  if (!isNative) return null;
+  try { const r = await RestAlerts.take(); return r && r.endAt !== undefined ? r : null; } catch { return null; }
+}
+export function onRestChange(cb) {
+  if (!isNative) return () => {};
+  const p = RestAlerts.addListener("rest", cb);
+  return () => { p.then(h => h.remove()); };
 }
 // event: "resume" | "pause"
 export function onAppState(event, cb) {
@@ -96,6 +106,23 @@ export async function saveFile(name, content, type = "application/json") {
   a.href = url; a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+// ---------- Automatic backups (Android) ----------
+// A copy of the data in Documents/Mercury, kept outside the app: it survives an uninstall or a
+// phone reset and can be loaded back with Settings › Restore. The newest few are kept.
+const AUTO_DIR = "Mercury";
+const AUTO_KEEP = 4;
+export async function writeAutoBackup(json, date) {
+  if (!isNative) return null;
+  const path = `${AUTO_DIR}/mercury-auto-${date}.json`;
+  await Filesystem.writeFile({ path, data: json, directory: Directory.Documents, encoding: "utf8", recursive: true });
+  try {
+    const { files } = await Filesystem.readdir({ path: AUTO_DIR, directory: Directory.Documents });
+    const old = files.map(f => f.name).filter(n => /^mercury-auto-.*\.json$/.test(n)).sort().reverse().slice(AUTO_KEEP);
+    await Promise.all(old.map(n => Filesystem.deleteFile({ path: `${AUTO_DIR}/${n}`, directory: Directory.Documents }).catch(() => {})));
+  } catch {}
+  return `Documents/${path}`;
 }
 
 // Shares an image (share card): native share sheet, Web Share, or download as fallback.

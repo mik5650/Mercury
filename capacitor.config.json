@@ -3,7 +3,7 @@
   "appName": "Mercury",
   "webDir": "dist",
   "android": {
-    "backgroundColor": "#08080A"
+    "backgroundColor": "#000000"
   },
   "plugins": {
     "SystemBars": {

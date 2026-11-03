@@ -235,11 +235,16 @@ export function withIds(wo) {
 }
 
 // ============ Set helpers ============
-// Log entry: { ex, si, w: "185", r: "8", done: true, b?: true }
+// Log entry: { ex, si, w: "185", r: "8", done: true, b?: true, t?: "w"|"d"|"f", rpe?: 8 }
+// t = set type: warm-up, drop set, to failure (none = working set). Warm-ups count as done
+// but stay out of volume, records and progression.
+export const SET_TYPES = { w: { label: "Warm-up", short: "W" }, d: { label: "Drop set", short: "D" }, f: { label: "Failure", short: "F" } };
+export const RPE_VALUES = [6, 7, 7.5, 8, 8.5, 9, 9.5, 10];
 export function setKey(exId, si, isB) { return `${exId}${isB ? "-b" : ""}-${si}`; }
 export function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
 export function entryDone(e) { return !!(e && e.done && (num(e.r) > 0)); }
-export function entryVol(e) { return entryDone(e) ? num(e.w) * num(e.r) : 0; }
+export function entryWork(e) { return entryDone(e) && e.t !== "w"; }
+export function entryVol(e) { return entryWork(e) ? num(e.w) * num(e.r) : 0; }
 export function epley1RM(w, r) {
   w = num(w); r = num(r);
   if (!w || !r) return 0;
@@ -252,12 +257,12 @@ export function parseRepRange(reps) {
   return isNaN(n) ? null : [n, n];
 }
 
-// All completed sets in the log, flattened
-export function allSets(store) {
+// All completed working sets in the log, flattened (warm-ups too with withWarmups)
+export function allSets(store, withWarmups = false) {
   const out = [];
   Object.entries(store.log || {}).forEach(([date, dayLog]) => {
     Object.entries(dayLog || {}).forEach(([key, e]) => {
-      if (entryDone(e)) out.push({ date, key, ex: e.ex, si: e.si || 0, w: num(e.w), r: num(e.r) });
+      if (withWarmups ? entryDone(e) : entryWork(e)) out.push({ date, key, ex: e.ex, si: e.si || 0, w: num(e.w), r: num(e.r), t: e.t || "", rpe: e.rpe || "" });
     });
   });
   return out;
@@ -270,7 +275,7 @@ export function exerciseSessions(store, name, beforeDate) {
     if (beforeDate && date >= beforeDate) return;
     Object.values(dayLog || {}).forEach(e => {
       if (e && e.ex === name && entryDone(e)) {
-        (byDate[date] = byDate[date] || []).push({ w: num(e.w), r: num(e.r), si: e.si || 0 });
+        (byDate[date] = byDate[date] || []).push({ w: num(e.w), r: num(e.r), si: e.si || 0, t: e.t || "" });
       }
     });
   });
@@ -278,13 +283,15 @@ export function exerciseSessions(store, name, beforeDate) {
     .sort((a, b) => b[0].localeCompare(a[0]))
     .map(([date, sets]) => {
       sets.sort((a, b) => a.si - b.si);
+      const work = sets.filter(s => s.t !== "w");
       return {
-        date, sets,
-        best1RM: Math.max(...sets.map(s => epley1RM(s.w, s.r))),
-        topW: Math.max(...sets.map(s => s.w)),
-        vol: sets.reduce((a, s) => a + s.w * s.r, 0),
+        date, sets, work,
+        best1RM: Math.max(0, ...work.map(s => epley1RM(s.w, s.r))),
+        topW: Math.max(0, ...work.map(s => s.w)),
+        vol: work.reduce((a, s) => a + s.w * s.r, 0),
       };
-    });
+    })
+    .filter(s => s.work.length);
 }
 
 // Last performance of an exercise before a date → array indexed by set number
@@ -302,7 +309,7 @@ export function suggestNext(store, name, reps, unit, beforeDate = todayKey()) {
   const range = parseRepRange(reps);
   const inc = unit === "kg" ? 2.5 : 5;
   const topW = last.topW;
-  const working = last.sets.filter(s => s.w === topW);
+  const working = last.work.filter(s => s.w === topW);
   if (!range || !topW) {
     return { w: topW, r: working[0] ? working[0].r : null, why: "Match last session, beat it by one rep.", kind: "hold" };
   }
@@ -499,7 +506,7 @@ export function recomputePRs(log) {
   const prs = {};
   Object.entries(log).sort((a, b) => a[0].localeCompare(b[0])).forEach(([date, dayLog]) => {
     Object.values(dayLog).forEach(e => {
-      if (!entryDone(e) || !num(e.w)) return;
+      if (!entryWork(e) || !num(e.w)) return;
       const e1 = epley1RM(e.w, e.r);
       const old = prs[e.ex];
       if (!old || e1 > old.e1rm) prs[e.ex] = { w: num(e.w), r: num(e.r), date, e1rm: e1, ...(old ? {} : { first: true }) };
@@ -512,6 +519,7 @@ export const DEFAULT_SETTINGS = {
   unit: "lb", theme: "auto", restDefault: 90, autoRest: true, sound: true,
   bar: 45, waterGoal: 8, weeklyGoal: 4, weightGoal: "",
   accent: "volt", name: "", onboarded: false, notify: true,
+  autoBackup: true, lastAutoBackup: 0, health: false,
 };
 
 export function freshStore(withDemo = true) {
@@ -751,7 +759,7 @@ export function programToWo(days) {
 export function sessionTopSets(store, date) {
   const top = {};
   Object.values(store.log[date] || {}).forEach(e => {
-    if (!entryDone(e)) return;
+    if (!entryWork(e)) return;
     const cur = top[e.ex];
     if (!cur || epley1RM(e.w, e.r) > epley1RM(cur.w, cur.r)) top[e.ex] = { w: num(e.w), r: num(e.r) };
   });
@@ -837,7 +845,7 @@ export function closeStaleSession(st) {
       date, day: day ? day.label : "Workout", dayKey: s.dayKey,
       duration: Math.min(2 * 3600, Math.round((Date.now() - s.start) / 1000)),
       volume: Math.round(done.reduce((a, e) => a + entryVol(e), 0)),
-      exercises: new Set(done.map(e => e.ex)).size, sets: done.length, id: uid(),
+      exercises: new Set(done.map(e => e.ex)).size, sets: done.length, id: uid(), start: s.start,
     }, ...sessHist];
   }
   return { ...st, activeSession: null, activeRest: null, sessHist };

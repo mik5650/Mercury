@@ -8,6 +8,7 @@ export function restAlertState(store) {
   const rest = store.activeRest;
   return {
     restEndAt: rest ? rest.endAt : 0,
+    restTotal: rest ? rest.total : 0,
     restAlert: !!S.notify,
     accent: ACCENT_HEX[S.accent] || ACCENT_HEX.volt,
     next: nextSetText(store),

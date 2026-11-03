@@ -11,28 +11,42 @@ import android.graphics.Color;
 import android.media.AudioAttributes;
 import android.media.RingtoneManager;
 import android.os.Build;
+import android.os.Bundle;
 import androidx.core.app.NotificationCompat;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * Rest-end alerts.
+ * Rest timer outside the app.
  *
- * The web app pushes a small snapshot (rest end time, what's next). The alarm and its alert are
- * native so they fire on time with the app in the background or the screen off, and so the alert
- * is never removed or silenced by the app's own countdown.
+ * The web app pushes a small snapshot (rest end time, what's next). While the app is in the
+ * background a silent live notification counts the rest down (lock screen included) with
+ * +30 s / Skip buttons, and an exact alarm pops the "Rest complete" alert when it ends.
+ * Changes made from the notification are kept here until the web app takes them.
  */
 public final class RestAlerts {
 
     static final String PREFS = "mercury_live";
     static final String CH_ALERT = "rest-alert";
+    static final String CH_LIVE = "rest-live";
     static final int ID_ALERT = 4301;
+    static final int ID_LIVE = 4302;
     static final String A_REST_END = "com.mik5650.mercury.live.REST_END";
+    static final String A_ADD = "com.mik5650.mercury.live.REST_ADD";
+    static final String A_SKIP = "com.mik5650.mercury.live.REST_SKIP";
+    static final int ADD_SECONDS = 30;
 
     private static final int ACCENT_DEFAULT = 0xFFC6F432;
 
-    /** True while the app is on screen: rest alerts are then handled in-app instead. */
+    /** True while the app is on screen: the rest timer is then shown in-app instead. */
     static volatile boolean appVisible = false;
+
+    /** Set by the plugin while the app runs: tells the web app about changes made here. */
+    interface Listener {
+        void onRestChanged(long endAt, int total);
+    }
+
+    static volatile Listener listener;
 
     private RestAlerts() {}
 
@@ -72,6 +86,14 @@ public final class RestAlerts {
         alert.setLockscreenVisibility(NotificationCompat.VISIBILITY_PUBLIC);
         nm.createNotificationChannel(alert);
 
+        NotificationChannel live = new NotificationChannel(CH_LIVE, "Rest timer", NotificationManager.IMPORTANCE_DEFAULT);
+        live.setDescription("Silent countdown while you rest, with +30 s and Skip");
+        live.setSound(null, null);
+        live.enableVibration(false);
+        live.setShowBadge(false);
+        live.setLockscreenVisibility(NotificationCompat.VISIBILITY_PUBLIC);
+        nm.createNotificationChannel(live);
+
         // Channels and notifications from earlier versions
         nm.deleteNotificationChannel("rest-timer");
         nm.deleteNotificationChannel("workout-live");
@@ -82,18 +104,88 @@ public final class RestAlerts {
     static void applyUpdate(Context c, JSONObject st) {
         JSONObject old = load(c);
         long now = System.currentTimeMillis();
+        // A change made from the notification wins until the web app has taken it
+        JSONObject pending = old.optJSONObject("pending");
+        if (pending != null && now - pending.optLong("at") < 10 * 60 * 1000L) {
+            try {
+                st.put("pending", pending);
+                st.put("restEndAt", pending.optLong("endAt"));
+                st.put("restTotal", pending.optInt("total"));
+            } catch (JSONException ignored) {}
+        }
         save(c, st);
         long end = st.optLong("restEndAt");
         long oldEnd = old.optLong("restEndAt");
         if (end > now) {
             scheduleAlarm(c, end);
+            if (!appVisible) postLive(c, st);
         } else {
             cancelAlarm(c);
+            cancelLive(c);
             // The app's own countdown can reach zero a moment before the alarm fires:
             // a rest that just ran out still gets its alert.
             boolean justEnded = oldEnd > 0 && oldEnd <= now + 1500 && oldEnd > now - 30000;
             if (justEnded && !appVisible && st.optBoolean("restAlert", true)) postAlert(c, st);
         }
+    }
+
+    /** The rest change made from the notification, if the web app hasn't taken it yet (then cleared). */
+    static synchronized JSONObject takePending(Context c) {
+        JSONObject st = load(c);
+        JSONObject pending = st.optJSONObject("pending");
+        if (pending != null) {
+            st.remove("pending");
+            save(c, st);
+        }
+        return pending;
+    }
+
+    // ---------- App in the background / back on screen ----------
+    static void onAppHidden(Context c) {
+        appVisible = false;
+        JSONObject st = load(c);
+        if (st.optLong("restEndAt") > System.currentTimeMillis()) postLive(c, st);
+    }
+
+    static void onAppShown(Context c) {
+        appVisible = true;
+        cancelLive(c);
+        cancelAlert(c);
+    }
+
+    // ---------- Buttons on the live notification ----------
+    static void addTime(Context c) {
+        JSONObject st = load(c);
+        long now = System.currentTimeMillis();
+        long end = st.optLong("restEndAt");
+        if (end <= now) return;
+        end += ADD_SECONDS * 1000L;
+        int total = st.optInt("restTotal", 0) + ADD_SECONDS;
+        setRest(c, st, end, total);
+        scheduleAlarm(c, end);
+        if (!appVisible) postLive(c, st);
+    }
+
+    static void skip(Context c) {
+        JSONObject st = load(c);
+        setRest(c, st, 0, 0);
+        cancelAlarm(c);
+        cancelLive(c);
+    }
+
+    private static void setRest(Context c, JSONObject st, long end, int total) {
+        try {
+            JSONObject pending = new JSONObject();
+            pending.put("endAt", end);
+            pending.put("total", total);
+            pending.put("at", System.currentTimeMillis());
+            st.put("restEndAt", end);
+            st.put("restTotal", total);
+            st.put("pending", pending);
+        } catch (JSONException ignored) {}
+        save(c, st);
+        Listener l = listener;
+        if (l != null) l.onRestChanged(end, total);
     }
 
     // ---------- Rest end ----------
@@ -105,6 +197,7 @@ public final class RestAlerts {
             st.put("restEndAt", 0);
         } catch (JSONException ignored) {}
         save(c, st);
+        cancelLive(c);
         if (!appVisible && st.optBoolean("restAlert", true)) postAlert(c, st);
     }
 
@@ -137,6 +230,46 @@ public final class RestAlerts {
         if (nm != null) nm.cancel(ID_ALERT);
     }
 
+    // ---------- Live countdown ----------
+    static void postLive(Context c, JSONObject st) {
+        long end = st.optLong("restEndAt");
+        if (end <= System.currentTimeMillis()) return;
+        ensureChannels(c);
+        NotificationManager nm = c.getSystemService(NotificationManager.class);
+        if (nm == null) return;
+        String next = st.optString("next");
+        NotificationCompat.Builder b = new NotificationCompat.Builder(c, CH_LIVE)
+            .setSmallIcon(R.drawable.ic_stat_mercury)
+            .setColor(parseColor(st.optString("accent"), ACCENT_DEFAULT))
+            .setContentTitle("Resting")
+            .setContentText(next.isEmpty() ? "Next set coming up" : "Next: " + next)
+            .setWhen(end)
+            .setShowWhen(true)
+            .setUsesChronometer(true)
+            .setChronometerCountDown(true)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setCategory(NotificationCompat.CATEGORY_STOPWATCH)
+            .setGroup("mercury.rest-live")
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setTimeoutAfter(end - System.currentTimeMillis() + 5000)
+            .setContentIntent(openApp(c))
+            .addAction(0, "+" + ADD_SECONDS + " s", action(c, A_ADD, 78))
+            .addAction(0, "Skip", action(c, A_SKIP, 79));
+        // Android 16 Live Updates: countdown chip in the status bar and on the lock screen
+        Bundle extras = new Bundle();
+        extras.putBoolean("android.requestPromotedOngoing", true);
+        b.addExtras(extras);
+        nm.notify(ID_LIVE, b.build());
+    }
+
+    static void cancelLive(Context c) {
+        NotificationManager nm = c.getSystemService(NotificationManager.class);
+        if (nm != null) nm.cancel(ID_LIVE);
+    }
+
+    // ---------- Alarm ----------
     static void scheduleAlarm(Context c, long at) {
         AlarmManager am = c.getSystemService(AlarmManager.class);
         if (am == null) return;
@@ -163,8 +296,12 @@ public final class RestAlerts {
     }
 
     private static PendingIntent restEndIntent(Context c) {
-        Intent i = new Intent(c, RestAlertReceiver.class).setAction(A_REST_END);
-        return PendingIntent.getBroadcast(c, 77, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        return action(c, A_REST_END, 77);
+    }
+
+    private static PendingIntent action(Context c, String act, int requestCode) {
+        Intent i = new Intent(c, RestAlertReceiver.class).setAction(act);
+        return PendingIntent.getBroadcast(c, requestCode, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     private static PendingIntent openApp(Context c) {
