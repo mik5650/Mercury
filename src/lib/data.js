@@ -726,9 +726,16 @@ export function withDayAggregates(st, date, dayKey) {
 export function daySetCount(day) {
   return (day.exercises || []).reduce((a, ex) => a + ex.sets * (ex.isSuperset ? 2 : 1), 0);
 }
+// FST-7: an exercise with exactly 7 sets rests 45s unless it has its own rest time
+export function autoRest(sets, restDefault) {
+  return num(sets) === 7 ? 45 : restDefault;
+}
+export function exerciseRest(ex, restDefault) {
+  return ex.rest || autoRest(ex.sets, restDefault);
+}
 // ~45s per set of work + rest between sets
 export function estimateMinutes(day, restDefault = 90) {
-  const secs = (day.exercises || []).reduce((a, ex) => a + ex.sets * ((ex.isSuperset ? 90 : 45) + (ex.rest || restDefault)), 0);
+  const secs = (day.exercises || []).reduce((a, ex) => a + ex.sets * ((ex.isSuperset ? 90 : 45) + exerciseRest(ex, restDefault)), 0);
   return Math.max(10, Math.round((secs / 60 + 8) / 5) * 5);
 }
 export function dayMuscles(day) {

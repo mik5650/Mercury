@@ -321,7 +321,7 @@ export function SettingsSheet({ onClose }) {
         <button className="btn" onClick={() => reset(true)}><Icon name="sparkle" size={16} /> Demo data</button>
       </div>
       <button className="btn danger block" onClick={() => reset(false)}>Erase everything</button>
-      <div className="caption" style={{ textAlign: "center", marginTop: 16, lineHeight: 1.5 }}>Mercury 3.3 · Your data stays on this device.<br />Back up before clearing browser data or switching phones.</div>
+      <div className="caption" style={{ textAlign: "center", marginTop: 16, lineHeight: 1.5 }}>Mercury 3.3.1 · Your data stays on this device.<br />Back up before clearing browser data or switching phones.</div>
     </Sheet>
   );
 }

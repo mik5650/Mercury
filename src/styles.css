@@ -29,6 +29,13 @@
   --sab: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
   --sal: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
   --sar: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+  /* Gap between the bottom nav and the screen edge */
+  --nav-b: calc(10px + var(--sab));
+}
+/* iPhone (Safari / home-screen app): the 34px home-indicator inset is generous,
+   so sit the nav just above the indicator instead of above the whole inset */
+@supports (-webkit-touch-callout: none) {
+  :root { --nav-b: max(10px, calc(env(safe-area-inset-bottom, 0px) - 18px)); }
 }
 
 /* ---------- Themes ---------- */
@@ -161,8 +168,8 @@ img { display: block; }
   -webkit-overflow-scrolling: touch;
   padding-top: var(--sat);
 }
-.screen { padding: 18px var(--gutter) calc(var(--nav-h) + 48px + var(--sab)); }
-.screen.with-mini { padding-bottom: calc(var(--nav-h) + 112px + var(--sab)); }
+.screen { padding: 18px var(--gutter) calc(var(--nav-h) + 38px + var(--nav-b)); }
+.screen.with-mini { padding-bottom: calc(var(--nav-h) + 102px + var(--nav-b)); }
 
 /* ---------- Motion ---------- */
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
@@ -332,7 +339,7 @@ img { display: block; }
 /* ---------- Bottom nav ---------- */
 .nav {
   position: absolute; z-index: 60;
-  left: 12px; right: 12px; bottom: calc(10px + var(--sab));
+  left: 12px; right: 12px; bottom: var(--nav-b);
   height: var(--nav-h);
   display: flex; align-items: center; justify-content: space-around;
   background: var(--glass);
@@ -356,7 +363,7 @@ img { display: block; }
 /* Mini player (live session / rest) */
 .mini {
   position: absolute; z-index: 59;
-  left: 12px; right: 12px; bottom: calc(var(--nav-h) + 18px + var(--sab));
+  left: 12px; right: 12px; bottom: calc(var(--nav-h) + 8px + var(--nav-b));
   height: 58px; border-radius: 20px;
   display: flex; align-items: center; gap: 12px; padding: 0 8px 0 14px;
   background: var(--glass);

@@ -8,6 +8,7 @@ import {
   parseRepRange, lastPerformance, suggestNext, warmupSets, recomputePRs, haptic, unlockAudio,
   dayKeys, suggestedDay, withDayAggregates, daySetCount, estimateMinutes, exerciseMuscles, MUSCLE_LABEL,
   EXERCISE_LIBRARY,
+  exerciseRest,
 } from "../lib/data.js";
 
 export function TrainScreen() {
@@ -111,7 +112,7 @@ function Strength() {
     });
     haptic(left ? [18, 40, 26] : [30, 60, 30, 60, 90]);
     if (isPR && old) { celebrate(); haptic([60, 40, 140]); flash(`New record · ${name} ${w}×${r}`, { icon: "trophy" }); }
-    if (S.autoRest) startRest(ex.rest || S.restDefault);
+    if (S.autoRest) startRest(exerciseRest(ex, S.restDefault));
   };
 
   const updateEx = (ei, fn) => setStore(prev => {
@@ -249,7 +250,7 @@ function Strength() {
             onPatch={patchSet} onToggle={toggleDone}
             onSets={d => setCount(ei, d)} onMove={d => move(ei, d)} onRemove={() => remove(ei)}
             onEdit={() => open("editExercise", { dayKey, ei })}
-            onRest={() => startRest(ex.rest || S.restDefault)} />
+            onRest={() => startRest(exerciseRest(ex, S.restDefault))} />
         ))}
       </div>
       {workout.exercises.length > 0 && (
@@ -442,7 +443,7 @@ function ExerciseCard({ ex, ei, n, log, editing, onPatch, onToggle, onSets, onMo
         <button className="btn sm ghost" onClick={() => onSets(1)}><Icon name="plus" size={15} /> Set</button>
         <button className="btn sm ghost" disabled={ex.sets <= 1} onClick={() => onSets(-1)}><Icon name="minus" size={15} /> Set</button>
         <div className="flex1" />
-        <button className="btn sm" onClick={onRest}><Icon name="timer" size={15} /> <span className="num">{fmtTime(ex.rest || store.settings.restDefault)}</span></button>
+        <button className="btn sm" onClick={onRest}><Icon name="timer" size={15} /> <span className="num">{fmtTime(exerciseRest(ex, store.settings.restDefault))}</span></button>
       </div>
     </div>
   );

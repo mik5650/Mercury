@@ -6,6 +6,7 @@ import {
   todayKey, addDays, fmtDate, fmtTime, fmtTimeLong, fmtVol, num, uid, entryDone, entryVol, epley1RM, SET_TYPES,
   exerciseSessions, suggestNext, allSets, EXERCISE_LIBRARY, MUSCLES, MUSCLE_LABEL, guessMuscles,
   getStreak, sessionTopSets, recomputePRs,
+  autoRest, exerciseRest,
 } from "../lib/data.js";
 import { saveFile, shareImage, isNative } from "../lib/native.js";
 import { CARDIO_KINDS } from "../screens/train.jsx";
@@ -234,14 +235,14 @@ export function EditExerciseSheet({ payload, onClose }) {
   const { store, setStore, undoable, open } = useApp();
   const { dayKey, ei } = payload;
   const ex = store.wo[dayKey] && store.wo[dayKey].exercises[ei];
-  const [f, setF] = useState(() => ex ? { name: ex.name, sets: ex.sets, reps: ex.reps, note: ex.note || "", rest: ex.rest || store.settings.restDefault, ss: !!ex.isSuperset, nameB: ex.nameB || "" } : null);
+  const [f, setF] = useState(() => ex ? { name: ex.name, sets: ex.sets, reps: ex.reps, note: ex.note || "", rest: exerciseRest(ex, store.settings.restDefault), ss: !!ex.isSuperset, nameB: ex.nameB || "" } : null);
   if (!ex || !f) return null;
   const set = p => setF(x => ({ ...x, ...p }));
   const save = () => {
     setStore(p => {
       const exs = [...p.wo[dayKey].exercises];
       exs[ei] = { ...exs[ei], name: f.name.trim() || ex.name, sets: f.sets, reps: f.reps || "8-10", note: f.note.trim(),
-        rest: f.rest === p.settings.restDefault ? undefined : f.rest, isSuperset: f.ss && !!f.nameB.trim(), nameB: f.nameB.trim() || undefined };
+        rest: f.rest === autoRest(f.sets, p.settings.restDefault) ? undefined : f.rest, isSuperset: f.ss && !!f.nameB.trim(), nameB: f.nameB.trim() || undefined };
       return { ...p, wo: { ...p.wo, [dayKey]: { ...p.wo[dayKey], exercises: exs } } };
     });
     onClose();
@@ -259,7 +260,7 @@ export function EditExerciseSheet({ payload, onClose }) {
       <input className="field" value={f.name} onChange={e => set({ name: e.target.value })} list="exlib" style={{ marginBottom: 14 }} />
       <datalist id="exlib">{EXERCISE_LIBRARY.map(e => <option key={e.n} value={e.n} />)}</datalist>
       <div className="list" style={{ marginBottom: 14 }}>
-        <div className="list-row"><span className="flex1" style={{ fontWeight: 600 }}>Sets</span><Stepper value={f.sets} onChange={v => set({ sets: v })} min={1} max={12} /></div>
+        <div className="list-row"><span className="flex1" style={{ fontWeight: 600 }}>Sets</span><Stepper value={f.sets} onChange={v => set({ sets: v, rest: f.rest === autoRest(f.sets, store.settings.restDefault) ? autoRest(v, store.settings.restDefault) : f.rest })} min={1} max={12} /></div>
         <div className="list-row"><span className="flex1" style={{ fontWeight: 600 }}>Rest</span><Stepper value={f.rest} onChange={v => set({ rest: v })} step={15} min={15} max={600} format={fmtTime} /></div>
         <div className="list-row"><span className="flex1" style={{ fontWeight: 600 }}>Superset</span><Toggle on={f.ss} onChange={v => set({ ss: v })} label="Superset" /></div>
       </div>
